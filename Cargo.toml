@@ -1,0 +1,19 @@
+[package]
+name = "genshin-fps-linux"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Native Linux FPS target patch for Genshin Impact under Wine"
+
+[lib]
+name = "genshin_fps_preload"
+crate-type = ["cdylib"]
+
+[[bin]]
+name = "genshin-fps"
+path = "src/main.rs"
+
+[profile.release]
+panic = "abort"
+strip = true
+
