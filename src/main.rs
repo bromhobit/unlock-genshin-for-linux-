@@ -2,8 +2,12 @@ use std::os::unix::process::CommandExt;
 use std::{
     env,
     ffi::{CString, c_void},
-    path::PathBuf,
+    fs::{self, OpenOptions},
+    io,
+    os::unix::fs::{MetadataExt, PermissionsExt},
+    path::{Component, PathBuf},
     process::{Command, exit},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 unsafe extern "C" {
@@ -64,6 +68,84 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
+fn stage_library(lib: &std::path::Path) -> Result<PathBuf, String> {
+    let home = fs::canonicalize(env::var_os("HOME").ok_or("HOME unset")?)
+        .map_err(|e| format!("HOME: {e}"))?;
+    let data = env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".local/share"));
+    if !data.is_absolute() || !data.starts_with(&home) {
+        return Err("XDG_DATA_HOME must be an absolute path under HOME".into());
+    }
+    let uid = fs::metadata(&home).map_err(|e| e.to_string())?.uid();
+    let mut data_dir = home.clone();
+    for component in data
+        .strip_prefix(&home)
+        .map_err(|e| e.to_string())?
+        .components()
+    {
+        let Component::Normal(name) = component else {
+            return Err("unsafe XDG_DATA_HOME component".into());
+        };
+        data_dir.push(name);
+        if !data_dir.exists() {
+            fs::create_dir(&data_dir).map_err(|e| format!("data directory: {e}"))?;
+        }
+        let meta = fs::symlink_metadata(&data_dir).map_err(|e| e.to_string())?;
+        if !meta.is_dir() || meta.file_type().is_symlink() || meta.uid() != uid {
+            return Err("data directory is not safely owned".into());
+        }
+    }
+    let dir = data_dir.join("genshin-fps");
+    if dir
+        .to_string_lossy()
+        .chars()
+        .any(|c| c.is_whitespace() || c == ':')
+    {
+        return Err("Steam preload path cannot contain whitespace or ':'".into());
+    }
+    if !dir.exists() {
+        fs::create_dir(&dir).map_err(|e| format!("stage directory: {e}"))?;
+    }
+    let meta = fs::symlink_metadata(&dir).map_err(|e| e.to_string())?;
+    if !meta.is_dir()
+        || meta.file_type().is_symlink()
+        || meta.uid() != uid
+        || meta.permissions().mode() & 0o022 != 0
+    {
+        return Err("stage directory is not safely owned".into());
+    }
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_nanos();
+    let temp = dir.join(format!(".preload-{}-{stamp}.tmp", std::process::id()));
+    let target = dir.join(format!(
+        "libgenshin_fps_preload-{}-{stamp}.so",
+        std::process::id()
+    ));
+    let result = (|| -> Result<(), String> {
+        let mut input = fs::File::open(lib).map_err(|e| e.to_string())?;
+        let mut output = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)
+            .map_err(|e| e.to_string())?;
+        io::copy(&mut input, &mut output).map_err(|e| e.to_string())?;
+        output
+            .set_permissions(fs::Permissions::from_mode(0o700))
+            .map_err(|e| e.to_string())?;
+        output.sync_all().map_err(|e| e.to_string())?;
+        fs::rename(&temp, &target).map_err(|e| e.to_string())?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result?;
+    Ok(target)
+}
+
 fn run(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("help" | "--help" | "-h") | None => {
@@ -75,7 +157,7 @@ fn run(args: &[String]) -> Result<(), String> {
                 return Err("usage: genshin-fps steam-options FPS".into());
             }
             let target = fps(args.get(1))?;
-            let lib = library()?;
+            let lib = stage_library(&library()?)?;
             println!(
                 "GENSHIN_FPS_TARGET={target} LD_PRELOAD={}\u{24}{{LD_PRELOAD:+:\u{24}LD_PRELOAD}} %command%",
                 shell_quote(&lib.to_string_lossy())

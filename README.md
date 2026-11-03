@@ -12,7 +12,7 @@
 
 ## Установка готового пакета (Arch Linux / CachyOS)
 
-Скачайте со страницы [выпуска 0.2.0 Preview](https://github.com/bromhobit/unlock-genshin-for-linux-/releases/tag/v0.2.0-preview.1) два файла в один каталог: `genshin-fps-linux-0.2.0-1-x86_64.pkg.tar.zst` и `install-genshin-fps.sh`. Запустите:
+Скачайте со страницы [выпуска 0.2.1 Preview](https://github.com/bromhobit/unlock-genshin-for-linux-/releases/tag/v0.2.1-preview.1) два файла в один каталог: `genshin-fps-linux-0.2.1-1-x86_64.pkg.tar.zst` и `install-genshin-fps.sh`. Запустите:
 
 ```sh
 chmod +x install-genshin-fps.sh
@@ -22,7 +22,7 @@ chmod +x install-genshin-fps.sh
 Установщик вызовет `pacman -U` через `pkexec` либо `sudo`. Можно установить пакет вручную:
 
 ```sh
-sudo pacman -U -- ./genshin-fps-linux-0.2.0-1-x86_64.pkg.tar.zst
+sudo pacman -U -- ./genshin-fps-linux-0.2.1-1-x86_64.pkg.tar.zst
 ```
 
 Пакет установит зависимости `python`, `python-gobject`, `gtk4` и `glibc` через pacman. Wine/Proton устанавливаются отдельно. Для удаления: `sudo pacman -Rns genshin-fps-linux`. Установщик предназначен только для Arch Linux и CachyOS.
@@ -41,7 +41,7 @@ genshin-fps launch 120 -- wine /путь/к/GenshinImpact.exe
 genshin-fps steam-options 120
 ```
 
-Последняя команда выдаёт готовую строку для параметров запуска Steam с абсолютным путём к установленной `.so`. Используйте `%command%` в выданной строке. Путь к другой библиотеке можно указать через `GENSHIN_FPS_LIB=/абсолютный/путь/libgenshin_fps_preload.so`. Для сообщений preload добавьте `GENSHIN_FPS_LOG=1`. Если Steam runtime не передаёт `LD_PRELOAD` в процесс Wine, эффект не появится.
+Команда `steam-options` при явном вызове атомарно копирует библиотеку в личный каталог `${XDG_DATA_HOME:-$HOME/.local/share}/genshin-fps` и выдаёт строку с этим путём для *Launch Options*. Это делает путь доступным для типичной конфигурации Steam pressure-vessel. Путь к домашнему каталогу и `XDG_DATA_HOME` не должен содержать пробелов, других пробельных символов или `:`: загрузчик Linux не поддерживает их в `LD_PRELOAD`. Скопируйте всю строку, включая `%command%`; уже заданный `LD_PRELOAD` сохраняется. Каждый вызов создаёт отдельный файл, поэтому старые копии можно удалить вручную после замены параметров Steam. Путь к исходной библиотеке можно указать через `GENSHIN_FPS_LIB=/абсолютный/путь/libgenshin_fps_preload.so`. Для диагностики добавьте в параметры запуска `GENSHIN_FPS_LOG=1` перед `GENSHIN_FPS_TARGET`. Сообщения будут в `${XDG_STATE_HOME:-$HOME/.local/state}/genshin-fps/preload-*.log` (не более 64 КиБ на процесс); откройте последний файл через `ls -t ~/.local/state/genshin-fps/preload-*.log | head -1`. Наличие файла подтверждает загрузку ELF, но не изменение FPS в игре.
 
 ## Сборка из исходников
 
@@ -70,6 +70,6 @@ genshin-fps steam-options 120
 
 ## Ограничения и происхождение
 
-Библиотека ищет загруженный PE32+ AMD64 с точным именем `GenshinImpact.exe` или `YuanShen.exe`, проверяет сигнатуру и адрес записи и меняет значение только внутри текущего процесса. Новая версия игры, иной способ отображения PE в Wine или ограничения Steam runtime могут помешать работе. `diagnose` проверяет загрузку ELF в отдельном тестовом процессе, не игру. Патч не включает инъекцию DLL, обход античита или функции upstream за пределами FPS.
+Библиотека потоково сканирует читаемые области PE32+ AMD64 размером до 1 ГиБ, включая анонимное отображение Wine при совпадении имени процесса с игрой. Она ищет исполняемый файл с точным именем `GenshinImpact.exe` или `YuanShen.exe`, проверяет сигнатуру и адрес записи и меняет значение только внутри текущего процесса. Новая версия игры, иной способ отображения PE в Wine или ограничения Steam runtime могут помешать работе. `diagnose` проверяет загрузку ELF в отдельном тестовом процессе, не игру. Патч не включает инъекцию DLL, обход античита или функции upstream за пределами FPS.
 
 Реализация алгоритма FPS опирается на [genshin-fps-unlock](https://github.com/34736384/genshin-fps-unlock), файл `UnlockerStub/dllmain.cpp::SetupData` на коммите `2b85d61dd06f6e11ad86fdd6bd90339f9abc58eb`. Лицензия проекта — [MIT](LICENSE). Состав и ограничения версии: [заметки к выпуску](docs/RELEASE-NOTES.md).

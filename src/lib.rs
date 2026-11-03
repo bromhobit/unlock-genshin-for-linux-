@@ -4,8 +4,14 @@ mod resolver;
 
 use std::{
     ffi::c_void,
-    fs, thread,
-    time::{Duration, Instant},
+    fs::{self, OpenOptions},
+    io::Write,
+    ops::Range,
+    os::unix::fs::MetadataExt,
+    path::PathBuf,
+    sync::OnceLock,
+    thread,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 #[repr(C)]
@@ -84,7 +90,7 @@ fn game_path(path: &str) -> bool {
     matches!(
         path.strip_suffix(" (deleted)")
             .unwrap_or(path)
-            .rsplit('/')
+            .rsplit(['/', '\\'])
             .next(),
         Some("GenshinImpact.exe" | "YuanShen.exe")
     )
@@ -126,35 +132,44 @@ fn write_self(address: usize, fps: i32) -> Result<(), String> {
     }
 }
 
-fn read_image(base: usize, maps: &[Mapping]) -> Result<Vec<u8>, String> {
-    let mut header = [0u8; 0x1000];
-    read_self(base, &mut header)?;
-    let nt = u32::from_le_bytes(header[0x3c..0x40].try_into().unwrap()) as usize;
-    if &header[..2] != b"MZ"
-        || nt.checked_add(0x60).is_none_or(|v| v > header.len())
-        || header.get(nt..nt + 4) != Some(b"PE\0\0")
-    {
-        return Err("mapped executable lacks valid PE headers".into());
+fn mapped_read(base: usize, maps: &[Mapping], offset: usize, out: &mut [u8]) -> Result<(), String> {
+    let mut address = base.checked_add(offset).ok_or("PE address overflow")?;
+    let end = address.checked_add(out.len()).ok_or("PE read overflow")?;
+    let mut done = 0;
+    while address < end {
+        let map = maps
+            .iter()
+            .find(|m| m.readable && m.start <= address && address < m.end)
+            .ok_or_else(|| format!("unreadable PE mapping at {address:#x}"))?;
+        let len = (map.end - address).min(end - address);
+        read_self(address, &mut out[done..done + len])?;
+        done += len;
+        address += len;
     }
-    let size = u32::from_le_bytes(header[nt + 24 + 56..nt + 24 + 60].try_into().unwrap()) as usize;
-    if !(0x1000..=256 * 1024 * 1024).contains(&size) {
-        return Err("invalid or excessive PE image size".into());
-    }
-    let end = base.checked_add(size).ok_or("PE image address overflow")?;
-    let mut image = vec![0u8; size];
-    for map in maps
+    Ok(())
+}
+
+fn readable_ranges(
+    base: usize,
+    size: usize,
+    maps: &[Mapping],
+) -> Result<Vec<Range<usize>>, String> {
+    let end = base.checked_add(size).ok_or("PE address overflow")?;
+    let mut ranges: Vec<Range<usize>> = Vec::new();
+    for m in maps
         .iter()
         .filter(|m| m.readable && m.end > base && m.start < end)
     {
-        let mut address = map.start.max(base);
-        let stop = map.end.min(end);
-        while address < stop {
-            let count = (stop - address).min(64 * 1024);
-            read_self(address, &mut image[address - base..address - base + count])?;
-            address += count;
+        let range = m.start.max(base) - base..m.end.min(end) - base;
+        if let Some(last) = ranges.last_mut()
+            && range.start <= last.end
+        {
+            last.end = last.end.max(range.end);
+            continue;
         }
+        ranges.push(range);
     }
-    Ok(image)
+    Ok(ranges)
 }
 
 fn writable(address: usize, maps: &[Mapping]) -> bool {
@@ -165,37 +180,125 @@ fn writable(address: usize, maps: &[Mapping]) -> bool {
         })
 }
 
-fn resolve_live(maps: &[Mapping]) -> Result<Option<usize>, String> {
-    let candidates: Vec<_> = maps
-        .iter()
-        .filter(|m| m.offset == 0 && m.readable && game_path(&m.path))
-        .collect();
-    if candidates.is_empty() {
-        return Ok(None);
-    }
-    if candidates.len() != 1 {
-        return Err("multiple game PE base mappings".into());
-    }
-    let base = candidates[0].start;
-    let image = read_image(base, maps)?;
-    let offset = resolver::resolve(&image).map_err(str::to_owned)?;
+fn game_process() -> bool {
+    fs::read("/proc/self/cmdline").ok().is_some_and(|raw| {
+        raw.split(|b| *b == 0).any(|arg| {
+            let path = String::from_utf8_lossy(arg);
+            game_path(&path)
+        })
+    })
+}
+
+fn resolve_base(base: usize, maps: &[Mapping]) -> Result<usize, String> {
+    let mut header = [0u8; 8192];
+    mapped_read(base, maps, 0, &mut header)?;
+    let pe = resolver::parse(&header).map_err(str::to_owned)?;
+    let ranges = readable_ranges(base, pe.size, maps)?;
+    let offset = resolver::resolve(&pe, &ranges, |off, out| mapped_read(base, maps, off, out))
+        .map_err(str::to_owned)?;
     let address = base.checked_add(offset).ok_or("FPS address overflow")?;
     if !writable(address, maps) {
         return Err("FPS target is not fully writable and aligned".into());
     }
-    Ok(Some(address))
+    Ok(address)
+}
+
+fn resolve_live(maps: &[Mapping]) -> Result<Option<(usize, usize)>, String> {
+    let mut candidates: Vec<_> = maps
+        .iter()
+        .filter(|m| m.offset == 0 && m.readable && game_path(&m.path))
+        .map(|m| m.start)
+        .collect();
+    // Wine can reserve the PE as private anonymous memory. Only inspect anonymous
+    // bases in a process whose own command line names the game executable.
+    if candidates.is_empty() && game_process() {
+        candidates = maps
+            .iter()
+            .filter(|m| m.readable && m.offset == 0 && m.path.is_empty() && m.end - m.start >= 8192)
+            .filter(|m| {
+                let mut magic = [0; 2];
+                read_self(m.start, &mut magic).is_ok() && magic == *b"MZ"
+            })
+            .map(|m| m.start)
+            .collect();
+    }
+    if candidates.is_empty() {
+        return Ok(None);
+    }
+    let mut resolved = None;
+    let mut last_error = String::new();
+    for base in candidates {
+        match resolve_base(base, maps) {
+            Ok(address) => {
+                if resolved.replace((base, address)).is_some() {
+                    return Err("multiple valid game PE images".into());
+                }
+            }
+            Err(e) => {
+                last_error = e;
+            }
+        }
+    }
+    if resolved.is_none() {
+        Err(format!("no validated game PE target: {last_error}"))
+    } else {
+        Ok(resolved)
+    }
 }
 
 fn log(enabled: bool, message: &str) {
     if enabled {
         eprintln!("[genshin-fps] {message}");
+        static FILE: OnceLock<Option<PathBuf>> = OnceLock::new();
+        let path = FILE.get_or_init(|| {
+            let home = fs::canonicalize(std::env::var_os("HOME")?).ok()?;
+            let state = std::env::var_os("XDG_STATE_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| home.join(".local/state"));
+            if !state.is_absolute() || !state.starts_with(&home) {
+                return None;
+            }
+            fs::create_dir_all(&state).ok()?;
+            let state = state.canonicalize().ok()?;
+            if !state.starts_with(&home) {
+                return None;
+            }
+            let dir = state.join("genshin-fps");
+            if !dir.exists() {
+                fs::create_dir(&dir).ok()?;
+            }
+            let meta = fs::symlink_metadata(&dir).ok()?;
+            if !meta.is_dir()
+                || meta.file_type().is_symlink()
+                || meta.uid() != fs::metadata(&home).ok()?.uid()
+            {
+                return None;
+            }
+            let stamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .ok()?
+                .as_nanos();
+            Some(dir.join(format!("preload-{}-{stamp}.log", std::process::id())))
+        });
+        if let Some(path) = path {
+            let existing = fs::symlink_metadata(path).ok();
+            if existing
+                .as_ref()
+                .is_some_and(|m| !m.is_file() || m.len() >= 64 * 1024)
+            {
+                return;
+            }
+            if let Ok(mut file) = OpenOptions::new().append(true).create(true).open(path) {
+                let _ = writeln!(file, "[genshin-fps] {message}");
+            }
+        }
     }
 }
 
 fn worker(fps: i32, logging: bool) {
     let deadline = Instant::now() + Duration::from_secs(120);
     let mut resolution_failures = 0;
-    let address = loop {
+    let (base, address) = loop {
         let maps = match mappings() {
             Ok(m) => m,
             Err(e) => {
@@ -204,16 +307,17 @@ fn worker(fps: i32, logging: bool) {
             }
         };
         match resolve_live(&maps) {
-            Ok(Some(address)) => break address,
+            Ok(Some(found)) => break found,
             Ok(None) => (),
             Err(e) => {
                 resolution_failures += 1;
-                if resolution_failures == 1 || resolution_failures == 20 {
+                if resolution_failures == 1 || resolution_failures % 20 == 0 {
                     log(logging, &format!("resolution failed: {e}"));
                 }
                 // The image may still be loading when its first file map appears.
-                // Retry briefly; never write until the complete validation succeeds.
-                if resolution_failures >= 20 {
+                // Retry until the deadline; never write until validation succeeds.
+                if Instant::now() >= deadline {
+                    log(logging, "no validated game PE target within 120 seconds");
                     return;
                 }
                 thread::sleep(Duration::from_millis(500));
@@ -235,7 +339,7 @@ fn worker(fps: i32, logging: bool) {
             log(logging, "maps unavailable; stopped");
             break;
         };
-        if !maps.iter().any(|m| m.offset == 0 && game_path(&m.path)) || !writable(address, &maps) {
+        if !maps.iter().any(|m| m.start == base && m.readable) || !writable(address, &maps) {
             log(logging, "game or writable FPS target disappeared; stopped");
             break;
         }
@@ -281,3 +385,30 @@ extern "C" fn init() {
 #[used]
 #[unsafe(link_section = ".init_array")]
 static INIT: extern "C" fn() = init;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn ranges_do_not_bridge_unreadable_holes() {
+        let map = |start, end, readable, writable| Mapping {
+            start,
+            end,
+            readable,
+            writable,
+            offset: 0,
+            path: String::new(),
+        };
+        let maps = [
+            map(0x1000, 0x2000, true, false),
+            map(0x2000, 0x3000, false, false),
+            map(0x3000, 0x4000, true, true),
+        ];
+        assert_eq!(
+            readable_ranges(0x1000, 0x3000, &maps).unwrap(),
+            [0..0x1000, 0x2000..0x3000]
+        );
+        assert!(!writable(0x2ffc, &maps));
+        assert!(writable(0x3000, &maps));
+    }
+}

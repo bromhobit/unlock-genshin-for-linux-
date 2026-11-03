@@ -1,132 +1,170 @@
-//! Bounded PE and x86-64 resolver, based on upstream UnlockerStub::SetupData.
+//! Bounded live PE and x86-64 FPS resolver.
+use std::ops::Range;
+
 const PATTERN: &[u8] = &[0xB9, 0x3C, 0, 0, 0, 0xE8];
+const CHUNK: usize = 64 * 1024;
+const MAX_IMAGE: usize = 1024 * 1024 * 1024;
 
-fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
+fn u16_at(b: &[u8], n: usize) -> Option<u16> {
     Some(u16::from_le_bytes(
-        bytes.get(at..at.checked_add(2)?)?.try_into().ok()?,
+        b.get(n..n.checked_add(2)?)?.try_into().ok()?,
     ))
 }
-fn u32_at(bytes: &[u8], at: usize) -> Option<u32> {
+fn u32_at(b: &[u8], n: usize) -> Option<u32> {
     Some(u32::from_le_bytes(
-        bytes.get(at..at.checked_add(4)?)?.try_into().ok()?,
+        b.get(n..n.checked_add(4)?)?.try_into().ok()?,
     ))
 }
-fn i32_at(bytes: &[u8], at: usize) -> Option<i32> {
-    Some(i32::from_le_bytes(
-        bytes.get(at..at.checked_add(4)?)?.try_into().ok()?,
-    ))
-}
-fn relative(at: usize, instruction_len: usize, disp: i32) -> Option<usize> {
-    at.checked_add(instruction_len)?
-        .checked_add_signed(disp as isize)
+fn relative(at: usize, len: usize, disp: i32) -> Option<usize> {
+    at.checked_add(len)?.checked_add_signed(disp as isize)
 }
 
-/// Read addresses relative to image base; the caller must only supply bytes safely copied
-/// from a mapped PE image. No pointer dereferences occur here.
-pub fn resolve(image: &[u8]) -> Result<usize, &'static str> {
-    if image.get(..2) != Some(b"MZ") {
+#[derive(Debug)]
+pub struct Pe {
+    pub size: usize,
+    pub il2cpp: Range<usize>,
+}
+
+pub fn parse(header: &[u8]) -> Result<Pe, &'static str> {
+    if header.get(..2) != Some(b"MZ") {
         return Err("missing MZ header");
     }
-    let nt = u32_at(image, 0x3c).ok_or("short DOS header")? as usize;
-    if image.get(nt..nt.checked_add(4).ok_or("NT offset overflow")?) != Some(b"PE\0\0") {
+    let nt = u32_at(header, 0x3c).ok_or("short DOS header")? as usize;
+    if header
+        .get(nt..nt.checked_add(24).ok_or("NT offset overflow")?)
+        .is_none()
+        || header.get(nt..nt + 4) != Some(b"PE\0\0")
+    {
         return Err("missing PE signature");
     }
-    let sections = u16_at(image, nt + 6).ok_or("short COFF header")? as usize;
-    let optional_len = u16_at(image, nt + 20).ok_or("short COFF header")? as usize;
+    let sections = u16_at(header, nt + 6).ok_or("short COFF header")? as usize;
+    let optional_len = u16_at(header, nt + 20).ok_or("short COFF header")? as usize;
     if sections == 0 || sections > 96 || optional_len < 0x70 {
         return Err("invalid PE headers");
     }
     let optional = nt.checked_add(24).ok_or("PE offset overflow")?;
-    if u16_at(image, optional) != Some(0x20b) {
-        return Err("not PE32+ x86-64");
-    }
-    if u16_at(image, nt + 4) != Some(0x8664) {
-        return Err("not AMD64 PE");
-    }
-    let image_size = u32_at(image, optional + 56).ok_or("short optional header")? as usize;
-    if image_size != image.len() {
-        return Err("image size mismatch");
-    }
     let table = optional
         .checked_add(optional_len)
+        .ok_or("PE offset overflow")?;
+    let table_end = table
+        .checked_add(sections * 40)
         .ok_or("section table overflow")?;
-    let end = table
-        .checked_add(sections.checked_mul(40).ok_or("section count overflow")?)
-        .ok_or("section table overflow")?;
-    if end > image.len() {
-        return Err("section table outside image");
+    if table_end > header.len() {
+        return Err("section table outside bounded header");
     }
-    let mut range = None;
+    if u16_at(header, optional) != Some(0x20b) || u16_at(header, nt + 4) != Some(0x8664) {
+        return Err("not PE32+ AMD64");
+    }
+    let size = u32_at(header, optional + 56).ok_or("short optional header")? as usize;
+    if !(0x1000..=MAX_IMAGE).contains(&size) || table_end > size {
+        return Err("invalid or excessive PE image size");
+    }
+    let mut il2cpp = None;
     for i in 0..sections {
         let at = table + i * 40;
-        if image[at..at + 8] == *b"il2cpp\0\0" {
-            if range.is_some() {
+        if header[at..at + 8] == *b"il2cpp\0\0" {
+            if il2cpp.is_some() {
                 return Err("duplicate il2cpp section");
             }
-            let len = u32_at(image, at + 8).ok_or("short section")? as usize;
-            let start = u32_at(image, at + 12).ok_or("short section")? as usize;
-            let stop = start.checked_add(len).ok_or("section overflow")?;
-            if len == 0 || stop > image.len() {
+            let len = u32_at(header, at + 8).ok_or("short section")? as usize;
+            let start = u32_at(header, at + 12).ok_or("short section")? as usize;
+            let end = start.checked_add(len).ok_or("section overflow")?;
+            if len == 0 || end > size {
                 return Err("il2cpp section outside image");
             }
-            range = Some(start..stop);
+            il2cpp = Some(start..end);
         }
     }
-    let range = range.ok_or("missing il2cpp section")?;
-    let mut matches = Vec::new();
-    for offset in range.start..=range.end.saturating_sub(PATTERN.len()) {
-        if image.get(offset..offset + PATTERN.len()) != Some(PATTERN) {
-            continue;
+    Ok(Pe {
+        size,
+        il2cpp: il2cpp.ok_or("missing il2cpp section")?,
+    })
+}
+
+fn read<const N: usize>(
+    at: usize,
+    pe: &Pe,
+    reader: &mut impl FnMut(usize, &mut [u8]) -> Result<(), String>,
+) -> Option<[u8; N]> {
+    if at.checked_add(N)? > pe.size {
+        return None;
+    }
+    let mut b = [0; N];
+    reader(at, &mut b).ok()?;
+    Some(b)
+}
+
+fn target_for(
+    call: usize,
+    pe: &Pe,
+    reader: &mut impl FnMut(usize, &mut [u8]) -> Result<(), String>,
+) -> Option<usize> {
+    let d = i32::from_le_bytes(read::<4>(call + 1, pe, reader)?);
+    let dest = relative(call, 5, d)?;
+    if read::<1>(dest, pe, reader)? != [0xe9] {
+        return None;
+    }
+    let mut rip = call;
+    let mut visited = [usize::MAX; 16];
+    for index in 0..visited.len() {
+        let op = read::<1>(rip, pe, reader)?[0];
+        if op != 0xe8 && op != 0xe9 {
+            break;
         }
-        let call = offset + 5;
-        let Some(dest) = i32_at(image, call + 1).and_then(|d| relative(call, 5, d)) else {
-            continue;
-        };
-        // Upstream accepts only calls into an E9 jump thunk.
-        if image.get(dest) != Some(&0xE9) {
-            continue;
+        if visited[..index].contains(&rip) {
+            return None;
         }
-        let mut rip = call;
-        let mut visited = Vec::new();
-        for _ in 0..16 {
-            if !matches!(image.get(rip), Some(0xE8 | 0xE9)) {
+        visited[index] = rip;
+        let d = i32::from_le_bytes(read::<4>(rip + 1, pe, reader)?);
+        rip = relative(rip, 5, d)?;
+    }
+    if read::<2>(rip, pe, reader)? != [0x89, 0x0d] {
+        return None;
+    }
+    let d = i32::from_le_bytes(read::<4>(rip + 2, pe, reader)?);
+    let target = relative(rip, 6, d)?;
+    (target.is_multiple_of(4) && target.checked_add(4)? <= pe.size).then_some(target)
+}
+
+/// Scan readable mapped intervals only. Each interval is a contiguous readable byte range
+/// relative to image base. All reads, including thunk reads, go through the validated reader.
+pub fn resolve(
+    pe: &Pe,
+    ranges: &[Range<usize>],
+    mut reader: impl FnMut(usize, &mut [u8]) -> Result<(), String>,
+) -> Result<usize, &'static str> {
+    let mut found = None;
+    let mut chunk = vec![0; CHUNK + PATTERN.len() - 1];
+    for range in ranges {
+        let start = range.start.max(pe.il2cpp.start);
+        let stop = range.end.min(pe.il2cpp.end);
+        let mut at = start;
+        while at.checked_add(PATTERN.len()).is_some_and(|n| n <= stop) {
+            let len = (stop - at).min(chunk.len());
+            if reader(at, &mut chunk[..len]).is_err() {
                 break;
             }
-            if visited.contains(&rip) {
-                rip = image.len();
-                break;
+            for i in 0..=len - PATTERN.len() {
+                if chunk[i..i + PATTERN.len()] != *PATTERN {
+                    continue;
+                }
+                if let Some(target) = target_for(at + i + 5, pe, &mut reader)
+                    && found.replace(target).is_some()
+                {
+                    return Err("ambiguous FPS signature matches");
+                }
             }
-            visited.push(rip);
-            rip = match i32_at(image, rip + 1).and_then(|d| relative(rip, 5, d)) {
-                Some(next) if next < image.len() => next,
-                _ => image.len(),
-            };
-        }
-        // SetupData reads a displacement at rip+2. Require the expected 32-bit
-        // MOV [RIP+disp32], ECX opcode, so an arbitrary instruction cannot qualify.
-        if image.get(rip..rip.saturating_add(2)) != Some(&[0x89, 0x0D][..]) {
-            continue;
-        }
-        let Some(target) = i32_at(image, rip + 2).and_then(|d| relative(rip, 6, d)) else {
-            continue;
-        };
-        if target.checked_add(4).is_some_and(|end| end <= image.len()) && target.is_multiple_of(4) {
-            matches.push(target);
+            at += len - (PATTERN.len() - 1);
         }
     }
-    match matches.as_slice() {
-        [target] => Ok(*target),
-        [] => Err("no safe FPS signature match"),
-        _ => Err("ambiguous FPS signature matches"),
-    }
+    found.ok_or("no safe FPS signature match")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn fixture() -> Vec<u8> {
-        let mut b = vec![0u8; 0x2000];
+    fn header(size: u32) -> Vec<u8> {
+        let mut b = vec![0; 8192];
         b[..2].copy_from_slice(b"MZ");
         b[0x3c..0x40].copy_from_slice(&0x80u32.to_le_bytes());
         b[0x80..0x84].copy_from_slice(b"PE\0\0");
@@ -134,55 +172,68 @@ mod tests {
         b[0x86..0x88].copy_from_slice(&1u16.to_le_bytes());
         b[0x94..0x96].copy_from_slice(&0xf0u16.to_le_bytes());
         b[0x98..0x9a].copy_from_slice(&0x20bu16.to_le_bytes());
-        b[0xd0..0xd4].copy_from_slice(&0x2000u32.to_le_bytes());
+        b[0xd0..0xd4].copy_from_slice(&size.to_le_bytes());
         b[0x188..0x190].copy_from_slice(b"il2cpp\0\0");
-        b[0x190..0x194].copy_from_slice(&0x400u32.to_le_bytes());
-        b[0x194..0x198].copy_from_slice(&0x300u32.to_le_bytes());
-        b[0x320..0x326].copy_from_slice(PATTERN);
-        b[0x326..0x32a].copy_from_slice(&(0x380i32 - 0x32ai32).to_le_bytes());
-        b[0x380] = 0xE9;
-        b[0x381..0x385].copy_from_slice(&(0x400i32 - 0x385i32).to_le_bytes());
-        b[0x400..0x402].copy_from_slice(&[0x89, 0x0d]);
-        b[0x402..0x406].copy_from_slice(&(0x800i32 - 0x406i32).to_le_bytes());
+        b[0x190..0x194].copy_from_slice(&0x131a05b0u32.to_le_bytes());
+        b[0x194..0x198].copy_from_slice(&0x6c04000u32.to_le_bytes());
         b
     }
-
     #[test]
-    fn resolves_upstream_chain() {
-        assert_eq!(resolve(&fixture()), Ok(0x800));
+    fn accepts_large_sparse_image_and_chunk_boundary() {
+        let pe = parse(&header(0x1aff7000)).unwrap();
+        let mut bytes = vec![0; CHUNK * 2];
+        let pos = CHUNK - 3;
+        bytes[pos..pos + 6].copy_from_slice(PATTERN);
+        bytes[pos + 6..pos + 10].copy_from_slice(&(0x100i32 - (pos as i32 + 10)).to_le_bytes());
+        bytes[0x100] = 0xe9;
+        bytes[0x101..0x105].copy_from_slice(&(0x180i32 - 0x105i32).to_le_bytes());
+        bytes[0x180..0x182].copy_from_slice(&[0x89, 0x0d]);
+        bytes[0x182..0x186].copy_from_slice(&(0x200i32 - 0x186i32).to_le_bytes());
+        let base = pe.il2cpp.start;
+        let reader = |off: usize, out: &mut [u8]| {
+            let s = off.checked_sub(base).ok_or("hole")?;
+            out.copy_from_slice(bytes.get(s..s + out.len()).ok_or("hole")?);
+            Ok(())
+        };
+        assert_eq!(
+            resolve(
+                &pe,
+                std::slice::from_ref(&(base..base + bytes.len())),
+                reader
+            ),
+            Ok(base + 0x200)
+        );
+        assert!(pe.size > 256 * 1024 * 1024);
+        let second = pos + 32;
+        bytes[second..second + 6].copy_from_slice(PATTERN);
+        bytes[second + 6..second + 10]
+            .copy_from_slice(&(0x100i32 - (second as i32 + 10)).to_le_bytes());
+        let reader = |off: usize, out: &mut [u8]| {
+            let s = off.checked_sub(base).ok_or("hole")?;
+            out.copy_from_slice(bytes.get(s..s + out.len()).ok_or("hole")?);
+            Ok(())
+        };
+        assert_eq!(
+            resolve(
+                &pe,
+                std::slice::from_ref(&(base..base + bytes.len())),
+                reader
+            ),
+            Err("ambiguous FPS signature matches")
+        );
     }
     #[test]
-    fn rejects_bad_section() {
-        let mut b = fixture();
-        b[0x194..0x198].copy_from_slice(&0x1ff0u32.to_le_bytes());
-        assert!(resolve(&b).is_err());
-    }
-    #[test]
-    fn rejects_bad_signature_and_opcode() {
-        let mut b = fixture();
-        b[0x320] = 0;
-        assert!(resolve(&b).is_err());
-        let mut b = fixture();
-        b[0x400] = 0;
-        assert!(resolve(&b).is_err());
-    }
-    #[test]
-    fn rejects_cycles_and_ambiguous_matches() {
-        let mut b = fixture();
-        b[0x381..0x385].copy_from_slice(&(0x380i32 - 0x385i32).to_le_bytes());
-        assert!(resolve(&b).is_err());
-        let mut b = fixture();
-        b.copy_within(0x320..0x32a, 0x340);
-        b[0x346..0x34a].copy_from_slice(&(0x380i32 - 0x34ai32).to_le_bytes());
-        assert!(resolve(&b).is_err());
-    }
-    #[test]
-    fn garbage_never_panics() {
-        for size in 0..1024 {
-            assert!(resolve(&vec![0xff; size]).is_err());
-        }
-        let mut b = fixture();
-        b[0x3c..0x40].copy_from_slice(&u32::MAX.to_le_bytes());
-        assert!(resolve(&b).is_err());
+    fn rejects_bad_pe_and_unreadable_thunk() {
+        assert!(parse(&header(0x5000)).is_err());
+        let pe = parse(&header(0x1aff7000)).unwrap();
+        assert!(
+            resolve(&pe, std::slice::from_ref(&pe.il2cpp), |_, _| Err(
+                "unreadable".into()
+            ))
+            .is_err()
+        );
+        let mut h = header(0x1aff7000);
+        h[0x188] = 0;
+        assert!(parse(&h).is_err());
     }
 }

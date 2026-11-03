@@ -1,17 +1,18 @@
 # Maintainer: Genshin FPS Linux contributors
 pkgname=genshin-fps-linux
-pkgver=0.2.0
+pkgver=0.2.1
 pkgrel=1
 pkgdesc='Native Linux FPS target helper for Genshin Impact under Wine/Proton'
 arch=('x86_64')
-url='https://github.com/34736384/genshin-fps-unlock'
+url='https://github.com/bromhobit/unlock-genshin-for-linux-'
 license=('MIT')
 depends=('glibc' 'python' 'python-gobject' 'gtk4')
 makedepends=('rust' 'cargo')
 optdepends=('wine: launch through Wine' 'steam: launch through Steam/Proton')
+options=('!debug')
 source=("${pkgname}-${pkgver}.tar.gz")
 # Replaced with the exact source archive digest by scripts/build-arch-package.sh.
-sha256sums=('0ad0a64500b75797db8985716f7aca99f0549fa68de6bed452620774ecbed791')
+sha256sums=('593dca3da6b5d3cb45edefedc339117ec0dcca8e7b344eb1cf1a9142bc8ed245')
 
 build() {
   cd "${srcdir}/${pkgname}-${pkgver}"
