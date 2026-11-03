@@ -6,7 +6,7 @@ repo=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd -P)
 [ "$(id -u)" -ne 0 ] || fail 'makepkg должен запускаться обычным пользователем.'
 command -v makepkg >/dev/null 2>&1 || fail 'Установите pacman/makepkg.'
 command -v sha256sum >/dev/null 2>&1 || fail 'Не найден sha256sum.'
-version=0.2.1
+version=0.2.2
 name=genshin-fps-linux
 archive="$name-$version.tar.gz"
 package="$name-$version-1-x86_64.pkg.tar.zst"
@@ -15,6 +15,8 @@ trap 'rm -rf -- "$work"' EXIT HUP INT TERM
 source_dir="$work/source/$name-$version"
 build_dir="$work/build"
 mkdir -p "$source_dir/src" "$source_dir/data" "$build_dir" "$repo/release"
+# Do not publish old preview packages alongside the current release.
+rm -f -- "$repo/release"/genshin-fps-linux-*.pkg.tar.zst "$repo/release"/genshin-fps-linux-*.tar.gz
 
 # Explicit allowlist: the archive cannot pick up .git, target, logs or local secrets.
 for file in Cargo.toml Cargo.lock LICENSE genshin-fps-gui genshin-fps-gui.py; do

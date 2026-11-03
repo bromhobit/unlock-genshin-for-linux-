@@ -12,7 +12,7 @@
 
 ## Установка готового пакета (Arch Linux / CachyOS)
 
-Скачайте со страницы [выпуска 0.2.1 Preview](https://github.com/bromhobit/unlock-genshin-for-linux-/releases/tag/v0.2.1-preview.1) два файла в один каталог: `genshin-fps-linux-0.2.1-1-x86_64.pkg.tar.zst` и `install-genshin-fps.sh`. Запустите:
+Скачайте со страницы [выпуска 0.2.2 Preview](https://github.com/bromhobit/unlock-genshin-for-linux-/releases/tag/v0.2.2-preview.1) два файла в один каталог: `genshin-fps-linux-0.2.2-1-x86_64.pkg.tar.zst` и `install-genshin-fps.sh`. Запустите:
 
 ```sh
 chmod +x install-genshin-fps.sh
@@ -22,7 +22,7 @@ chmod +x install-genshin-fps.sh
 Установщик вызовет `pacman -U` через `pkexec` либо `sudo`. Можно установить пакет вручную:
 
 ```sh
-sudo pacman -U -- ./genshin-fps-linux-0.2.1-1-x86_64.pkg.tar.zst
+sudo pacman -U -- ./genshin-fps-linux-0.2.2-1-x86_64.pkg.tar.zst
 ```
 
 Пакет установит зависимости `python`, `python-gobject`, `gtk4` и `glibc` через pacman. Wine/Proton устанавливаются отдельно. Для удаления: `sudo pacman -Rns genshin-fps-linux`. Установщик предназначен только для Arch Linux и CachyOS.
@@ -70,6 +70,6 @@ genshin-fps steam-options 120
 
 ## Ограничения и происхождение
 
-Библиотека потоково сканирует читаемые области PE32+ AMD64 размером до 1 ГиБ, включая анонимное отображение Wine при совпадении имени процесса с игрой. Она ищет исполняемый файл с точным именем `GenshinImpact.exe` или `YuanShen.exe`, проверяет сигнатуру и адрес записи и меняет значение только внутри текущего процесса. Новая версия игры, иной способ отображения PE в Wine или ограничения Steam runtime могут помешать работе. `diagnose` проверяет загрузку ELF в отдельном тестовом процессе, не игру. Патч не включает инъекцию DLL, обход античита или функции upstream за пределами FPS.
+Библиотека потоково сканирует читаемые области PE32+ AMD64 размером до 1 ГиБ, включая анонимное отображение Wine при совпадении имени процесса с игрой. Она ищет исполняемый файл с точным именем `GenshinImpact.exe` или `YuanShen.exe`, проверяет сигнатуру и адрес записи и меняет значение только внутри текущего процесса. В версии 0.2.2 одинаковые совпадения сигнатуры, ведущие к одному адресу FPS, считаются одной целью. Если проверенные совпадения указывают на разные адреса, запись блокируется. Новая версия игры, иной способ отображения PE в Wine или ограничения Steam runtime могут помешать работе. `diagnose` проверяет загрузку ELF в отдельном тестовом процессе, не игру. Патч не включает инъекцию DLL, обход античита или функции upstream за пределами FPS.
 
 Реализация алгоритма FPS опирается на [genshin-fps-unlock](https://github.com/34736384/genshin-fps-unlock), файл `UnlockerStub/dllmain.cpp::SetupData` на коммите `2b85d61dd06f6e11ad86fdd6bd90339f9abc58eb`. Лицензия проекта — [MIT](LICENSE). Состав и ограничения версии: [заметки к выпуску](docs/RELEASE-NOTES.md).

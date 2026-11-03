@@ -148,10 +148,14 @@ pub fn resolve(
                 if chunk[i..i + PATTERN.len()] != *PATTERN {
                     continue;
                 }
-                if let Some(target) = target_for(at + i + 5, pe, &mut reader)
-                    && found.replace(target).is_some()
-                {
-                    return Err("ambiguous FPS signature matches");
+                if let Some(target) = target_for(at + i + 5, pe, &mut reader) {
+                    // Multiple call sites may legitimately reach the same FPS variable.
+                    // Only *different* validated target addresses are ambiguous.
+                    match found {
+                        None => found = Some(target),
+                        Some(previous) if previous == target => (),
+                        Some(_) => return Err("ambiguous FPS signature matches"),
+                    }
                 }
             }
             at += len - (PATTERN.len() - 1);
@@ -208,6 +212,26 @@ mod tests {
         bytes[second..second + 6].copy_from_slice(PATTERN);
         bytes[second + 6..second + 10]
             .copy_from_slice(&(0x100i32 - (second as i32 + 10)).to_le_bytes());
+        let reader = |off: usize, out: &mut [u8]| {
+            let s = off.checked_sub(base).ok_or("hole")?;
+            out.copy_from_slice(bytes.get(s..s + out.len()).ok_or("hole")?);
+            Ok(())
+        };
+        assert_eq!(
+            resolve(
+                &pe,
+                std::slice::from_ref(&(base..base + bytes.len())),
+                reader
+            ),
+            Ok(base + 0x200)
+        );
+        // A second, genuinely different writable-target candidate is still rejected.
+        bytes[second + 6..second + 10]
+            .copy_from_slice(&(0x300i32 - (second as i32 + 10)).to_le_bytes());
+        bytes[0x300] = 0xe9;
+        bytes[0x301..0x305].copy_from_slice(&(0x380i32 - 0x305i32).to_le_bytes());
+        bytes[0x380..0x382].copy_from_slice(&[0x89, 0x0d]);
+        bytes[0x382..0x386].copy_from_slice(&(0x400i32 - 0x386i32).to_le_bytes());
         let reader = |off: usize, out: &mut [u8]| {
             let s = off.checked_sub(base).ok_or("hole")?;
             out.copy_from_slice(bytes.get(s..s + out.len()).ok_or("hole")?);

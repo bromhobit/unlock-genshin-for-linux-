@@ -1,6 +1,6 @@
 # Maintainer: Genshin FPS Linux contributors
 pkgname=genshin-fps-linux
-pkgver=0.2.1
+pkgver=0.2.2
 pkgrel=1
 pkgdesc='Native Linux FPS target helper for Genshin Impact under Wine/Proton'
 arch=('x86_64')

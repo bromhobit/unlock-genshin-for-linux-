@@ -3,8 +3,8 @@ set -eu
 
 repo=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd -P)
 release="$repo/release"
-package_name=genshin-fps-linux-0.2.1-1-x86_64.pkg.tar.zst
-archive_name=genshin-fps-linux-0.2.1.tar.gz
+package_name=genshin-fps-linux-0.2.2-1-x86_64.pkg.tar.zst
+archive_name=genshin-fps-linux-0.2.2.tar.gz
 package="$release/$package_name"
 archive="$release/$archive_name"
 fail() { printf 'Packaging test failed: %s\n' "$*" >&2; exit 1; }
@@ -108,7 +108,7 @@ calls="$temp/calls"
 PATH="$temp/mock:$PATH" INSTALLER_CALLS="$calls" "$temp/installer/install-genshin-fps.sh" > "$temp/install.out" || fail 'installer dry run failed'
 [ "$(wc -l < "$calls")" -eq 1 ] || fail 'installer made unexpected privileged calls'
 grep -Fq "pacman -U -- $temp/installer/$package_name" "$calls" || fail 'installer did not call pacman on requested package'
-cp -- "$package" "$temp/installer/genshin-fps-linux-0.2.1-2-x86_64.pkg.tar.zst"
+cp -- "$package" "$temp/installer/genshin-fps-linux-0.2.2-2-x86_64.pkg.tar.zst"
 if PATH="$temp/mock:$PATH" INSTALLER_CALLS="$calls" "$temp/installer/install-genshin-fps.sh" > /dev/null 2>&1; then
   fail 'installer accepted multiple packages'
 fi
