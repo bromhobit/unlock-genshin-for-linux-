@@ -1,4 +1,6 @@
 /target/
 /codex-exec.log
 *.log
+__pycache__/
+*.pyc
 
