@@ -14,8 +14,8 @@ done
 [ -f "$package" ] || fail 'build package first with scripts/build-arch-package.sh'
 [ -f "$archive" ] && [ -f "$release/PKGBUILD" ] || fail 'source archive or staged PKGBUILD missing'
 [ -x "$release/install-genshin-fps.sh" ] || fail 'standalone installer missing'
-[ "$(wc -l < "$release/SHA256SUMS")" -eq 1 ] || fail 'SHA256SUMS must have one line'
-(cd "$release" && sha256sum --check --status --strict SHA256SUMS) || fail 'package SHA256 mismatch'
+[ ! -e "$release/SHA256SUMS" ] || fail 'separate SHA256SUMS must not be produced'
+! grep -Fq SHA256SUMS "$release/install-genshin-fps.sh" || fail 'installer must not reference removed file'
 source_sha=$(sha256sum "$archive" | cut -d ' ' -f 1)
 grep -Fq "sha256sums=('$source_sha')" "$release/PKGBUILD" || fail 'PKGBUILD source SHA256 mismatch'
 grep -Fq "source=(\"\${pkgname}-\${pkgver}.tar.gz\")" "$release/PKGBUILD" || fail 'PKGBUILD source name mismatch'
@@ -58,7 +58,7 @@ spec.loader.exec_module(module)
 assert module.find_cli() == sys.argv[2], module.find_cli()
 PY
 
-cp -- "$release/install-genshin-fps.sh" "$package" "$release/SHA256SUMS" "$temp/installer/"
+cp -- "$release/install-genshin-fps.sh" "$package" "$temp/installer/"
 cat > "$temp/mock/id" <<'EOF'
 #!/bin/sh
 [ "$1" = '-u' ] && { printf '1000\n'; exit 0; }
@@ -76,17 +76,12 @@ chmod +x "$temp/mock/id" "$temp/mock/pacman" "$temp/mock/pkexec"
 calls="$temp/calls"
 PATH="$temp/mock:$PATH" INSTALLER_CALLS="$calls" "$temp/installer/install-genshin-fps.sh" > "$temp/install.out" || fail 'installer dry run failed'
 [ "$(wc -l < "$calls")" -eq 1 ] || fail 'installer made unexpected privileged calls'
-grep -Fq "pacman -U -- $temp/installer/$package_name" "$calls" || fail 'installer did not call pacman on verified package'
-printf 'tampered\n' >> "$temp/installer/$package_name"
-if PATH="$temp/mock:$PATH" INSTALLER_CALLS="$calls" "$temp/installer/install-genshin-fps.sh" > /dev/null 2>&1; then
-  fail 'installer accepted corrupt package'
-fi
-[ "$(wc -l < "$calls")" -eq 1 ] || fail 'installer requested privilege before checksum check'
+grep -Fq "pacman -U -- $temp/installer/$package_name" "$calls" || fail 'installer did not call pacman on requested package'
 cp -- "$package" "$temp/installer/genshin-fps-linux-0.2.0-2-x86_64.pkg.tar.zst"
 if PATH="$temp/mock:$PATH" INSTALLER_CALLS="$calls" "$temp/installer/install-genshin-fps.sh" > /dev/null 2>&1; then
   fail 'installer accepted multiple packages'
 fi
-[ "$(wc -l < "$calls")" -eq 1 ] || fail 'installer requested privilege with multiple packages'
+[ "$(wc -l < "$calls")" -eq 1 ] || fail 'installer called privilege escalation with multiple packages'
 "$temp/installer/install-genshin-fps.sh" --help > /dev/null || fail 'installer help failed'
 
 user_home="$temp/userhome"

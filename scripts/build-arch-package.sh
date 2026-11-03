@@ -15,6 +15,7 @@ trap 'rm -rf -- "$work"' EXIT HUP INT TERM
 source_dir="$work/source/$name-$version"
 build_dir="$work/build"
 mkdir -p "$source_dir/src" "$source_dir/data" "$build_dir" "$repo/release"
+rm -f -- "$repo/release/SHA256SUMS"
 
 # Explicit allowlist: the archive cannot pick up .git, target, logs or local secrets.
 for file in Cargo.toml Cargo.lock LICENSE genshin-fps-gui genshin-fps-gui.py; do
@@ -41,6 +42,4 @@ install -m 644 "$build_dir/$package" "$repo/release/$package"
 install -m 644 "$build_dir/$archive" "$repo/release/$archive"
 install -m 644 "$build_dir/PKGBUILD" "$repo/release/PKGBUILD"
 install -m 755 "$repo/packaging/install-package.sh" "$repo/release/install-genshin-fps.sh"
-(cd "$repo/release" && sha256sum "$package" > SHA256SUMS)
 printf 'Готово: %s\n' "$repo/release/$package"
-printf 'SHA256: %s\n' "$(cut -d ' ' -f 1 "$repo/release/SHA256SUMS")"

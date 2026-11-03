@@ -12,17 +12,16 @@
 
 ## Установка готового пакета (Arch Linux / CachyOS)
 
-Скачайте со страницы [выпуска 0.2.0 Preview](https://github.com/bromhobit/unlock-genshin-for-linux-/releases/tag/v0.2.0-preview.1) три файла в один каталог: `genshin-fps-linux-0.2.0-1-x86_64.pkg.tar.zst`, `SHA256SUMS`, `install-genshin-fps.sh`. Запустите:
+Скачайте со страницы [выпуска 0.2.0 Preview](https://github.com/bromhobit/unlock-genshin-for-linux-/releases/tag/v0.2.0-preview.1) два файла в один каталог: `genshin-fps-linux-0.2.0-1-x86_64.pkg.tar.zst` и `install-genshin-fps.sh`. Запустите:
 
 ```sh
 chmod +x install-genshin-fps.sh
 ./install-genshin-fps.sh
 ```
 
-Установщик проверит SHA256 пакета до запроса прав и установит его через `pkexec` либо `sudo` с `pacman -U`. Можно проверить пакет и установить вручную:
+Установщик вызовет `pacman -U` через `pkexec` либо `sudo`. Можно установить пакет вручную:
 
 ```sh
-sha256sum -c SHA256SUMS
 sudo pacman -U -- ./genshin-fps-linux-0.2.0-1-x86_64.pkg.tar.zst
 ```
 
