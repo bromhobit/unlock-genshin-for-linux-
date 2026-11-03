@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-repo=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+repo=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 prefix="${HOME}/.local/lib/genshin-fps"
 bindir="${HOME}/.local/bin"
 datadir="${XDG_DATA_HOME:-${HOME}/.local/share}"

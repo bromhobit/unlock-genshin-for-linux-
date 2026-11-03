@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+repo=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd -P)
 release="$repo/release"
 package_name=genshin-fps-linux-0.2.0-1-x86_64.pkg.tar.zst
 archive_name=genshin-fps-linux-0.2.0.tar.gz

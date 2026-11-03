@@ -2,7 +2,7 @@
 set -eu
 
 fail() { printf 'Ошибка: %s\n' "$*" >&2; exit 1; }
-repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+repo=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd -P)
 [ "$(id -u)" -ne 0 ] || fail 'makepkg должен запускаться обычным пользователем.'
 command -v makepkg >/dev/null 2>&1 || fail 'Установите pacman/makepkg.'
 command -v sha256sum >/dev/null 2>&1 || fail 'Не найден sha256sum.'

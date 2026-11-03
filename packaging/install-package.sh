@@ -20,7 +20,7 @@ if [ "$#" -ne 0 ]; then
 fi
 
 fail() { printf 'Ошибка: %s\n' "$*" >&2; exit 1; }
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 [ -r /etc/os-release ] || fail 'Не удалось определить дистрибутив (/etc/os-release).'
 # Only the supported mutable Arch distributions are accepted here.
 # shellcheck disable=SC1091

@@ -2,11 +2,17 @@
 
 Нативная Linux-библиотека, CLI и графическое приложение GTK4 для задания целевого FPS в Genshin Impact под 64-битным Wine/Proton. Программа не меняет файлы игры и не включает саму игру.
 
+## Возможности
+
+- Графический запуск Genshin Impact через Wine/Proton с выбором целевого FPS.
+- Копирование параметров запуска Steam и диагностика нативной библиотеки.
+- Готовый пакет для Arch/CachyOS с ярлыком KDE и удалением через pacman.
+
 **Статус:** сборка и тестовый процесс проверены; работу в реальной игре и через Steam/Proton мы пока не подтвердили. Использование сторонних средств с игрой может противоречить её условиям; решение и риск остаются за вами.
 
 ## Установка готового пакета (Arch Linux / CachyOS)
 
-Скачайте из релиза три файла в один каталог: `genshin-fps-linux-0.2.0-1-x86_64.pkg.tar.zst`, `SHA256SUMS`, `install-genshin-fps.sh`. Запустите:
+Скачайте со страницы [выпуска 0.2.0 Preview](https://github.com/bromhobit/unlock-genshin-for-linux-/releases/tag/v0.2.0-preview.1) три файла в один каталог: `genshin-fps-linux-0.2.0-1-x86_64.pkg.tar.zst`, `SHA256SUMS`, `install-genshin-fps.sh`. Запустите:
 
 ```sh
 chmod +x install-genshin-fps.sh
