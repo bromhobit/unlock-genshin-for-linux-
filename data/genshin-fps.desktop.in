@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=Genshin FPS
-GenericName=Настройка целевого FPS для Genshin Impact
-Comment=Запуск через Wine/Proton и параметры запуска Steam
+Name=Genshin FPS — Steam
+GenericName=Параметры запуска Steam для 120 FPS
+Comment=Скопировать команду запуска Genshin Impact для Steam
 Exec=@GUI_EXEC@
 Icon=genshin-fps
 Terminal=false

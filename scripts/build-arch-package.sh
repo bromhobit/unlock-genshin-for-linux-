@@ -6,7 +6,7 @@ repo=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd -P)
 [ "$(id -u)" -ne 0 ] || fail 'makepkg должен запускаться обычным пользователем.'
 command -v makepkg >/dev/null 2>&1 || fail 'Установите pacman/makepkg.'
 command -v sha256sum >/dev/null 2>&1 || fail 'Не найден sha256sum.'
-version=0.2.2
+version=0.2.3
 name=genshin-fps-linux
 archive="$name-$version.tar.gz"
 package="$name-$version-1-x86_64.pkg.tar.zst"
@@ -22,7 +22,7 @@ rm -f -- "$repo/release"/genshin-fps-linux-*.pkg.tar.zst "$repo/release"/genshin
 for file in Cargo.toml Cargo.lock LICENSE genshin-fps-gui genshin-fps-gui.py; do
   cp -- "$repo/$file" "$source_dir/$file"
 done
-for file in main.rs lib.rs resolver.rs; do
+for file in main.rs lib.rs resolver.rs sha256.rs; do
   cp -- "$repo/src/$file" "$source_dir/src/$file"
 done
 for file in genshin-fps.desktop.in genshin-fps.svg; do

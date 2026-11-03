@@ -16,6 +16,15 @@ if [ "$desktop" != "$expected_data/applications/genshin-fps.desktop" ] || \
   printf 'Ошибка: XDG_DATA_HOME не совпадает с установкой; используйте прежнее значение.\n' >&2
   exit 1
 fi
+if [ "$(sed -n '3p' "$manifest")" = 'gfps=genshin-fps' ]; then
+  if [ -e "$bindir/gfps" ] || [ -L "$bindir/gfps" ]; then
+    if [ ! -L "$bindir/gfps" ] || [ "$(readlink -- "$bindir/gfps")" != 'genshin-fps' ]; then
+      printf 'Ошибка: %s изменён после установки; удаление остановлено.\n' "$bindir/gfps" >&2
+      exit 1
+    fi
+    rm -- "$bindir/gfps"
+  fi
+fi
 rm -f -- "$bindir/genshin-fps" "$bindir/genshin-fps-gui" \
   "$prefix/libgenshin_fps_preload.so" "$prefix/genshin-fps-gui.py" \
   "$desktop" "$icon" "$manifest"

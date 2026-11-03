@@ -1,10 +1,9 @@
-"""Command construction stays testable without GTK or a display."""
-
+"""The generator invokes only the side-effect-free CLI command."""
 import importlib.util
 from pathlib import Path
-import tempfile
 import unittest
-
+from unittest.mock import patch
+from types import SimpleNamespace
 
 GUI = Path(__file__).resolve().parents[1] / "genshin-fps-gui.py"
 spec = importlib.util.spec_from_file_location("genshin_fps_gui", GUI)
@@ -12,29 +11,30 @@ gui = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gui)
 
 
-class LaunchArgsTests(unittest.TestCase):
-    def test_game_path_with_spaces_is_one_argument(self):
-        with tempfile.TemporaryDirectory(prefix="game folder ") as directory:
-            game = Path(directory) / "GenshinImpact.exe"
-            game.touch()
-            args, cwd = gui.launch_args("/tmp/genshin-fps", 120, str(game), '"/proton path/proton" run')
-            self.assertEqual(
-                args,
-                ["/tmp/genshin-fps", "launch", "120", "--", "/proton path/proton", "run", str(game)],
+class GeneratorTests(unittest.TestCase):
+    def test_exact_options_and_single_safe_command(self):
+        with patch.object(gui.subprocess, "run", return_value=SimpleNamespace(
+            returncode=0, stdout="/usr/bin/gfps %command%\n", stderr=""
+        )) as run:
+            self.assertEqual(gui.generate_steam_options("/usr/bin/genshin-fps"),
+                             "/usr/bin/gfps %command%")
+            run.assert_called_once_with(
+                ["/usr/bin/genshin-fps", "steam-short-options"],
+                capture_output=True, text=True, check=False,
             )
-            self.assertEqual(cwd, directory)
 
-    def test_rejects_other_files_and_unbalanced_runner(self):
-        with tempfile.TemporaryDirectory() as directory:
-            wrong = Path(directory) / "other.exe"
-            wrong.touch()
+    def test_missing_cli_does_nothing(self):
+        with patch.object(gui.subprocess, "run") as run:
             with self.assertRaises(ValueError):
-                gui.launch_args("/tmp/genshin-fps", 120, str(wrong), "wine")
-            game = Path(directory) / "YuanShen.exe"
-            game.touch()
-            with self.assertRaises(ValueError):
-                gui.launch_args("/tmp/genshin-fps", 120, str(game), "'wine")
+                gui.generate_steam_options(None)
+            run.assert_not_called()
 
+    def test_invalid_cli_output_rejected(self):
+        with patch.object(gui.subprocess, "run", return_value=SimpleNamespace(
+            returncode=0, stdout="wrong\n", stderr=""
+        )):
+            with self.assertRaises(ValueError):
+                gui.generate_steam_options("/tmp/cli")
 
 if __name__ == "__main__":
     unittest.main()

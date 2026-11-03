@@ -20,9 +20,16 @@ if [ -f "$manifest" ]; then
     printf 'Ошибка: XDG_DATA_HOME изменился. Сначала запустите ./uninstall-user.sh с прежним XDG_DATA_HOME.\n' >&2
     exit 1
   fi
+  if [ -e "$bindir/gfps" ] || [ -L "$bindir/gfps" ]; then
+    if [ "$(sed -n '3p' "$manifest")" != 'gfps=genshin-fps' ] || \
+       [ ! -L "$bindir/gfps" ] || [ "$(readlink -- "$bindir/gfps")" != 'genshin-fps' ]; then
+      printf 'Ошибка: %s уже существует и не принадлежит этой установке. Оставляем файл без изменений.\n' "$bindir/gfps" >&2
+      exit 1
+    fi
+  fi
 else
   for path in "$prefix/libgenshin_fps_preload.so" "$prefix/genshin-fps-gui.py" \
-    "$bindir/genshin-fps" "$bindir/genshin-fps-gui" "$desktop" "$icon"; do
+    "$bindir/genshin-fps" "$bindir/gfps" "$bindir/genshin-fps-gui" "$desktop" "$icon"; do
     if [ -e "$path" ] || [ -L "$path" ]; then
       printf 'Ошибка: файл уже существует и не отмечен как установленный этим скриптом: %s\n' "$path" >&2
       exit 1
@@ -34,6 +41,7 @@ fi
 mkdir -p "$prefix" "$bindir" "$(dirname -- "$desktop")" "$(dirname -- "$icon")"
 install -m 755 "$repo/target/release/libgenshin_fps_preload.so" "$prefix/libgenshin_fps_preload.so"
 install -m 755 "$repo/target/release/genshin-fps" "$bindir/genshin-fps"
+ln -sfn genshin-fps "$bindir/gfps"
 install -m 644 "$repo/genshin-fps-gui.py" "$prefix/genshin-fps-gui.py"
 install -m 755 "$repo/genshin-fps-gui" "$bindir/genshin-fps-gui"
 install -m 644 "$repo/data/genshin-fps.svg" "$icon"
@@ -48,6 +56,6 @@ quoted = '"' + executable.replace('\\', '\\\\').replace('"', '\\"').replace('$',
 target.write_text(template.replace('@GUI_EXEC@', quoted), encoding="utf-8")
 target.chmod(0o644)
 PY
-printf '%s\n%s\n' "$desktop" "$icon" > "$manifest"
+printf '%s\n%s\ngfps=genshin-fps\n' "$desktop" "$icon" > "$manifest"
 chmod 600 "$manifest"
 printf 'Установлено: %s и %s\nУдаление: %s/uninstall-user.sh\n' "$bindir/genshin-fps" "$bindir/genshin-fps-gui" "$repo"
