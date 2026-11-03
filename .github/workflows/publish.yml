@@ -3,7 +3,7 @@ name: Check and package
 on:
   push:
     branches: [main]
-    tags: ['v0.2.3-preview.*']
+    tags: ['v0.2.4-preview.*']
   workflow_dispatch:
 
 jobs:
@@ -14,7 +14,7 @@ jobs:
       contents: write
     steps:
       - name: Install build tools
-        run: pacman -Syu --noconfirm --needed base-devel git rust python python-gobject gtk4 desktop-file-utils shellcheck
+        run: pacman -Syu --noconfirm --needed base-devel git rust python python-gobject gtk4 desktop-file-utils shellcheck github-cli
       - uses: actions/checkout@v4
       - name: Build and test as unprivileged user
         run: |
@@ -30,17 +30,17 @@ jobs:
       - name: Upload package artifact
         uses: actions/upload-artifact@v4
         with:
-          name: genshin-fps-linux-0.2.3-arch
+          name: genshin-fps-linux-0.2.4-arch
           path: |
             release/*.pkg.tar.zst
             release/install-genshin-fps.sh
             release/PKGBUILD
             release/*.tar.gz
       - name: Publish preview release
-        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v0.2.3-preview.')
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v0.2.4-preview.')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.2.3-preview.1
+          tag_name: v0.2.4-preview.1
           target_commitish: ${{ github.sha }}
           prerelease: true
           make_latest: false
@@ -52,3 +52,17 @@ jobs:
             release/install-genshin-fps.sh
             release/PKGBUILD
             release/*.tar.gz
+
+      - name: Remove superseded preview releases and tags
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v0.2.4-preview.')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Remove only the four known older preview versions, after 0.2.4 is published.
+          for tag in v0.2.0-preview.1 v0.2.1-preview.1 v0.2.2-preview.1 v0.2.3-preview.1; do
+            if gh release view "$tag" >/dev/null 2>&1; then
+              gh release delete "$tag" --cleanup-tag --yes
+            elif gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
+              gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$tag"
+            fi
+          done

@@ -25,8 +25,8 @@ fn usage() {
 Usage:\n\
   genshin-fps launch FPS -- WINE_OR_PROTON [ARG ...]\n\
   genshin-fps steam-options FPS\n\
-  genshin-fps steam-short-options\n\
-  gfps GAME_COMMAND [ARG ...]  (120 FPS)\n\
+  genshin-fps steam-short-options [FPS]\n\
+  gfps [--fps FPS] GAME_COMMAND [ARG ...]  (default: 120 FPS)\n\
   genshin-fps diagnose\n\
   genshin-fps help\n\n\
 FPS: integer 10..1000. The launch command forwards each argument without a shell.\n\
@@ -93,19 +93,19 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-fn short_options() -> Result<String, String> {
+fn short_options(target: Option<i32>) -> Result<String, String> {
     let exe = env::current_exe().map_err(|e| e.to_string())?;
     let alias = exe
         .parent()
         .ok_or("cannot locate executable directory")?
         .join("gfps");
-    let target = fs::canonicalize(&alias).map_err(|_| {
+    let alias_target = fs::canonicalize(&alias).map_err(|_| {
         format!(
             "gfps is not installed beside {}; run ./build.sh or install the package",
             exe.display()
         )
     })?;
-    if target != exe.canonicalize().map_err(|e| e.to_string())? {
+    if alias_target != exe.canonicalize().map_err(|e| e.to_string())? {
         return Err(format!("{} does not point to this build", alias.display()));
     }
     let path = alias.to_str().ok_or("gfps path is not UTF-8")?;
@@ -115,7 +115,10 @@ fn short_options() -> Result<String, String> {
     {
         return Err("gfps path contains characters unsupported in Steam Launch Options".into());
     }
-    Ok(format!("{path} %command%"))
+    match target {
+        Some(target) => Ok(format!("{path} --fps {target} %command%")),
+        None => Ok(format!("{path} %command%")),
+    }
 }
 
 fn safe_directory(
@@ -248,10 +251,22 @@ unsafe extern "C" {
     fn getuid() -> u32;
 }
 
-fn run_alias(args: &[OsString]) -> Result<(), String> {
-    if args.is_empty() {
-        return Err("usage: gfps GAME_COMMAND [ARG ...]".into());
+fn parse_alias_args(args: &[OsString]) -> Result<(i32, &[OsString]), String> {
+    let (target, command) = if args.first().is_some_and(|arg| arg == "--fps") {
+        let value = args.get(1).ok_or("missing FPS after --fps")?;
+        let value = value.to_str().ok_or("FPS must be an integer 10..1000")?;
+        (fps(Some(&value.to_string()))?, &args[2..])
+    } else {
+        (120, args)
+    };
+    if command.is_empty() {
+        return Err("usage: gfps [--fps FPS] GAME_COMMAND [ARG ...]".into());
     }
+    Ok((target, command))
+}
+
+fn run_alias(args: &[OsString]) -> Result<(), String> {
+    let (target, command) = parse_alias_args(args)?;
     let lib = stage_library(&bundled_library()?)?;
     let mut preload = lib.into_os_string();
     if let Some(old) = env::var_os("LD_PRELOAD")
@@ -260,14 +275,14 @@ fn run_alias(args: &[OsString]) -> Result<(), String> {
         preload.push(":");
         preload.push(old);
     }
-    let err = Command::new(&args[0])
-        .args(&args[1..])
-        .env("GENSHIN_FPS_TARGET", "120")
+    let err = Command::new(&command[0])
+        .args(&command[1..])
+        .env("GENSHIN_FPS_TARGET", target.to_string())
         .env("LD_PRELOAD", preload)
         .exec();
     Err(format!(
         "cannot launch {}: {err}",
-        args[0].to_string_lossy()
+        command[0].to_string_lossy()
     ))
 }
 
@@ -290,10 +305,11 @@ fn run(args: &[String]) -> Result<(), String> {
             Ok(())
         }
         Some("steam-short-options") => {
-            if args.len() != 1 {
-                return Err("usage: genshin-fps steam-short-options".into());
+            if args.len() > 2 {
+                return Err("usage: genshin-fps steam-short-options [FPS]".into());
             }
-            println!("{}", short_options()?);
+            let target = args.get(1).map(|value| fps(Some(value))).transpose()?;
+            println!("{}", short_options(target)?);
             Ok(())
         }
         Some("launch") => {
@@ -386,5 +402,37 @@ mod tests {
     #[test]
     fn shell_path_quote() {
         assert_eq!(shell_quote("a'b"), "'a'\\''b'");
+    }
+    #[test]
+    fn alias_fps_and_forwarded_arguments() {
+        let default = [OsString::from("game"), OsString::from("one two")];
+        let (target, command) = parse_alias_args(&default).unwrap();
+        assert_eq!(target, 120);
+        assert_eq!(command, &default);
+
+        let explicit = [
+            OsString::from("--fps"),
+            OsString::from("144"),
+            OsString::from("game"),
+            OsString::from("one two"),
+        ];
+        let (target, command) = parse_alias_args(&explicit).unwrap();
+        assert_eq!(target, 144);
+        assert_eq!(command, &explicit[2..]);
+    }
+    #[test]
+    fn alias_rejects_invalid_fps_before_staging() {
+        for args in [
+            vec![],
+            vec!["--fps"],
+            vec!["--fps", "144"],
+            vec!["--fps", "abc", "game"],
+            vec!["--fps", "9", "game"],
+            vec!["--fps", "1001", "game"],
+            vec!["--fps", "2147483648", "game"],
+        ] {
+            let args: Vec<OsString> = args.into_iter().map(OsString::from).collect();
+            assert!(parse_alias_args(&args).is_err(), "{args:?}");
+        }
     }
 }

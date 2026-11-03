@@ -3,8 +3,8 @@ set -eu
 
 repo=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd -P)
 release="$repo/release"
-package_name=genshin-fps-linux-0.2.3-1-x86_64.pkg.tar.zst
-archive_name=genshin-fps-linux-0.2.3.tar.gz
+package_name=genshin-fps-linux-0.2.4-1-x86_64.pkg.tar.zst
+archive_name=genshin-fps-linux-0.2.4.tar.gz
 package="$release/$package_name"
 archive="$release/$archive_name"
 fail() { printf 'Packaging test failed: %s\n' "$*" >&2; exit 1; }
@@ -23,7 +23,7 @@ grep -Fq "depends=('glibc' 'python' 'python-gobject' 'gtk4')" "$release/PKGBUILD
 if tar -tzf "$archive" | grep -Eq '(^|/)(\.git|target|.*\.log|\.aws|\.codex|\.agents)(/|$)'; then
   fail 'source archive contains local data or build output'
 fi
-tar -tzf "$archive" | grep -Fq 'genshin-fps-linux-0.2.3/src/sha256.rs' || fail 'source archive omits hash implementation'
+tar -tzf "$archive" | grep -Fq 'genshin-fps-linux-0.2.4/src/sha256.rs' || fail 'source archive omits hash implementation'
 if command -v shellcheck >/dev/null 2>&1; then
   shellcheck "$repo/install-user.sh" "$repo/uninstall-user.sh" \
     "$repo/packaging/install-package.sh" "$repo/scripts/build-arch-package.sh" "$0"
@@ -63,10 +63,27 @@ mkdir -p "$temp/steam-home/data"
 HOME="$temp/steam-home" XDG_DATA_HOME="$temp/steam-home/data" \
   "$root/usr/bin/genshin-fps" steam-short-options > "$temp/options" || fail 'short options failed'
 [ "$(cat "$temp/options")" = "$root/usr/bin/gfps %command%" ] || fail 'wrong short options'
+HOME="$temp/steam-home" XDG_DATA_HOME="$temp/steam-home/data" \
+  "$root/usr/bin/genshin-fps" steam-short-options 144 > "$temp/options" || fail 'selected short options failed'
+[ "$(cat "$temp/options")" = "$root/usr/bin/gfps --fps 144 %command%" ] || fail 'wrong selected short options'
 [ ! -e "$temp/steam-home/data/genshin-fps" ] || fail 'preview staged the library'
 [ -L "$root/usr/bin/gfps" ] && [ "$(readlink "$root/usr/bin/gfps")" = genshin-fps ] || fail 'gfps alias mismatch'
 if "$root/usr/bin/gfps" > /dev/null 2>&1; then fail 'empty gfps accepted'; fi
 [ ! -e "$temp/steam-home/data/genshin-fps" ] || fail 'empty gfps staged the library'
+for bad in 9 1001 abc 2147483648; do
+  if HOME="$temp/steam-home" XDG_DATA_HOME="$temp/steam-home/data" \
+    "$root/usr/bin/gfps" --fps "$bad" /usr/bin/true > /dev/null 2>&1; then
+    fail "gfps accepted invalid FPS $bad"
+  fi
+  if "$root/usr/bin/genshin-fps" steam-short-options "$bad" > /dev/null 2>&1; then
+    fail "short options accepted invalid FPS $bad"
+  fi
+done
+if HOME="$temp/steam-home" XDG_DATA_HOME="$temp/steam-home/data" \
+  "$root/usr/bin/gfps" --fps > /dev/null 2>&1; then fail 'gfps accepted missing FPS'; fi
+if HOME="$temp/steam-home" XDG_DATA_HOME="$temp/steam-home/data" \
+  "$root/usr/bin/gfps" --fps 144 > /dev/null 2>&1; then fail 'gfps accepted missing command'; fi
+[ ! -e "$temp/steam-home/data/genshin-fps" ] || fail 'invalid gfps staged the library'
 cat > "$temp/harmless" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$1" "$2" "$GENSHIN_FPS_TARGET" "$LD_PRELOAD" > "$CAPTURE"
@@ -74,17 +91,18 @@ EOF
 chmod +x "$temp/harmless"
 CAPTURE="$temp/capture" HOME="$temp/steam-home" XDG_DATA_HOME="$temp/steam-home/data" \
   LD_PRELOAD="$root/usr/lib/genshin-fps/libgenshin_fps_preload.so" \
-  "$root/usr/bin/gfps" "$temp/harmless" 'one two' 'three' || fail 'gfps forwarding failed'
+  "$root/usr/bin/gfps" --fps 144 "$temp/harmless" 'one two' 'three' || fail 'gfps forwarding failed'
 staged=$(find "$temp/steam-home/data/genshin-fps" -name '*.so' -type f -print -quit)
 [ -n "$staged" ] || fail 'gfps did not stage library'
 cmp -s "$staged" "$root/usr/lib/genshin-fps/libgenshin_fps_preload.so" || fail 'staged library differs'
 [ "$(sed -n '1p' "$temp/capture")" = 'one two' ] || fail 'argument with spaces changed'
 [ "$(sed -n '2p' "$temp/capture")" = three ] || fail 'second argument changed'
-[ "$(sed -n '3p' "$temp/capture")" = 120 ] || fail 'FPS target mismatch'
+[ "$(sed -n '3p' "$temp/capture")" = 144 ] || fail 'selected FPS target mismatch'
 [ "$(sed -n '4p' "$temp/capture")" = "$staged:$root/usr/lib/genshin-fps/libgenshin_fps_preload.so" ] || fail 'LD_PRELOAD not merged'
 first_count=$(find "$temp/steam-home/data/genshin-fps" -name '*.so' -type f | wc -l)
 CAPTURE="$temp/capture" HOME="$temp/steam-home" XDG_DATA_HOME="$temp/steam-home/data" \
   "$root/usr/bin/gfps" "$temp/harmless" a b || fail 'second gfps failed'
+[ "$(sed -n '3p' "$temp/capture")" = 120 ] || fail 'default FPS target mismatch'
 [ "$(find "$temp/steam-home/data/genshin-fps" -name '*.so' -type f | wc -l)" -eq "$first_count" ] || fail 'cache grew on repeat'
 printf 'corrupt\n' > "$staged"
 if CAPTURE="$temp/capture" HOME="$temp/steam-home" XDG_DATA_HOME="$temp/steam-home/data" \
@@ -103,7 +121,9 @@ if HOME="$temp/steam-home" XDG_DATA_HOME="$temp/steam-home/escape/new" \
   fail 'gfps accepted a data directory symlink escape'
 fi
 [ ! -e "$temp/other-data/new" ] || fail 'gfps wrote outside HOME'
-python3 - "$root/usr/lib/genshin-fps/genshin-fps-gui.py" "$root/usr/bin/genshin-fps" <<'PY'
+mkdir -p "$temp/preview-home/data"
+HOME="$temp/preview-home" XDG_DATA_HOME="$temp/preview-home/data" \
+  python3 - "$root/usr/lib/genshin-fps/genshin-fps-gui.py" "$root/usr/bin/genshin-fps" <<'PY'
 import importlib.util
 import sys
 
@@ -111,8 +131,9 @@ spec = importlib.util.spec_from_file_location("genshin_fps_gui_test", sys.argv[1
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 assert module.find_cli() == sys.argv[2], module.find_cli()
-assert module.generate_steam_options(sys.argv[2]) == str(__import__("pathlib").Path(sys.argv[2]).parent / "gfps") + " %command%"
+assert module.generate_steam_options(sys.argv[2], 144) == str(__import__("pathlib").Path(sys.argv[2]).parent / "gfps") + " --fps 144 %command%"
 PY
+[ ! -e "$temp/preview-home/data/genshin-fps" ] || fail 'GUI preview staged the library'
 
 cp -- "$release/install-genshin-fps.sh" "$package" "$temp/installer/"
 cat > "$temp/mock/id" <<'EOF'
@@ -134,7 +155,7 @@ calls="$temp/calls"
 PATH="$temp/mock:$PATH" INSTALLER_CALLS="$calls" "$temp/installer/install-genshin-fps.sh" > "$temp/install.out" || fail 'installer dry run failed'
 [ "$(wc -l < "$calls")" -eq 1 ] || fail 'installer made unexpected privileged calls'
 grep -Fq "pacman -U -- $temp/installer/$package_name" "$calls" || fail 'installer did not call pacman on requested package'
-cp -- "$package" "$temp/installer/genshin-fps-linux-0.2.3-2-x86_64.pkg.tar.zst"
+cp -- "$package" "$temp/installer/genshin-fps-linux-0.2.4-2-x86_64.pkg.tar.zst"
 if PATH="$temp/mock:$PATH" INSTALLER_CALLS="$calls" "$temp/installer/install-genshin-fps.sh" > /dev/null 2>&1; then
   fail 'installer accepted multiple packages'
 fi

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""GTK4 Steam launch options generator for the fixed 120 FPS command."""
+"""GTK4 Steam launch options generator with a selectable FPS target."""
 
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -21,16 +22,19 @@ def find_cli():
     return shutil.which("genshin-fps")
 
 
-def generate_steam_options(cli):
+def generate_steam_options(cli, fps):
     if not cli:
         raise ValueError("CLI не найден. Установите пакет или выполните ./build.sh.")
+    if isinstance(fps, bool) or not isinstance(fps, int) or not 10 <= fps <= 1000:
+        raise ValueError("FPS должен быть целым числом от 10 до 1000.")
     result = subprocess.run(
-        [cli, "steam-short-options"], capture_output=True, text=True, check=False
+        [cli, "steam-short-options", str(fps)],
+        capture_output=True, text=True, check=False,
     )
     if result.returncode:
         raise ValueError(result.stderr.strip() or "Не удалось получить параметры Steam.")
     value = result.stdout.strip()
-    if not value.endswith("/gfps %command%") or "\n" in value:
+    if not re.fullmatch(rf"/[^\s'\"%:\\]+/gfps --fps {fps} %command%", value):
         raise ValueError("CLI вернул некорректные параметры Steam.")
     return value
 
@@ -47,16 +51,16 @@ def main():
     class Window(Gtk.ApplicationWindow):
         def __init__(self, app):
             super().__init__(application=app, title="Genshin FPS — Steam")
-            self.set_default_size(520, 340)
-            self.set_size_request(380, 300)
-            root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
-            root.set_margin_top(28)
-            root.set_margin_bottom(28)
-            root.set_margin_start(30)
-            root.set_margin_end(30)
+            self.set_default_size(520, 280)
+            self.set_size_request(380, 250)
+            root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+            root.set_margin_top(24)
+            root.set_margin_bottom(24)
+            root.set_margin_start(28)
+            root.set_margin_end(28)
             self.set_child(root)
 
-            title = Gtk.Label(label="Genshin Impact · 120 FPS", xalign=0)
+            title = Gtk.Label(label="Genshin Impact · FPS", xalign=0)
             title.add_css_class("title-1")
             root.append(title)
             description = Gtk.Label(
@@ -64,6 +68,14 @@ def main():
                 xalign=0, wrap=True,
             )
             root.append(description)
+            fps_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            fps_row.append(Gtk.Label(label="Лимит FPS", xalign=0, hexpand=True))
+            self.fps = Gtk.SpinButton.new_with_range(10, 1000, 1)
+            self.fps.set_numeric(True)
+            self.fps.set_value(120)
+            self.fps.connect("value-changed", self.update_options)
+            fps_row.append(self.fps)
+            root.append(fps_row)
             self.options = Gtk.Entry(editable=False, hexpand=True)
             root.append(self.options)
             self.copy = Gtk.Button(label="Скопировать для Steam")
@@ -73,21 +85,32 @@ def main():
             root.append(self.copy)
             self.status = Gtk.Label(xalign=0, wrap=True)
             root.append(self.status)
+            self.cli = find_cli()
+            self.update_options()
+
+        def update_options(self, *_args):
             try:
-                self.value = generate_steam_options(find_cli())
-                self.options.set_text(self.value)
-                self.status.set_text("Готово для вставки в Steam.")
+                value = generate_steam_options(self.cli, self.fps.get_value_as_int())
             except (OSError, ValueError) as exc:
-                self.value = None
+                self.options.set_text("")
                 self.copy.set_sensitive(False)
                 self.status.set_text(str(exc))
+                return None
+            self.options.set_text(value)
+            self.copy.set_sensitive(True)
+            self.status.set_text("Готово для вставки в Steam.")
+            return value
 
         def copy_options(self, _button):
+            self.fps.update()
+            value = self.update_options()
+            if value is None:
+                return
             display = Gdk.Display.get_default()
             if display is None:
                 self.status.set_text("Буфер обмена недоступен.")
                 return
-            display.get_clipboard().set_text(self.value)
+            display.get_clipboard().set_text(value)
             self.status.set_text("Скопировано. Вставьте команду в параметры запуска Steam.")
 
     app = Gtk.Application(application_id="org.genshinfps.Gui")

@@ -6,7 +6,7 @@ repo=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd -P)
 [ "$(id -u)" -ne 0 ] || fail 'makepkg должен запускаться обычным пользователем.'
 command -v makepkg >/dev/null 2>&1 || fail 'Установите pacman/makepkg.'
 command -v sha256sum >/dev/null 2>&1 || fail 'Не найден sha256sum.'
-version=0.2.3
+version=0.2.4
 name=genshin-fps-linux
 archive="$name-$version.tar.gz"
 package="$name-$version-1-x86_64.pkg.tar.zst"
