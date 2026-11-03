@@ -1,72 +1,70 @@
 # Genshin FPS Linux
 
-Нативный Linux ELF порт части [genshin-fps-unlock](https://github.com/34736384/genshin-fps-unlock), которая задаёт FPS. Цель — Genshin Impact под 64-битным Wine/Proton на Arch, CachyOS и SteamOS. Это не Windows `.exe`, не замена игре и не модификация файлов игры. Программа распространяется под MIT; исходный алгоритм взят из upstream `netcore` на коммите `2b85d61dd06f6e11ad86fdd6bd90339f9abc58eb` (`UnlockerStub/dllmain.cpp::SetupData`).
+Нативная Linux-библиотека, CLI и графическое приложение GTK4 для задания целевого FPS в Genshin Impact под 64-битным Wine/Proton. Программа не меняет файлы игры и не включает саму игру.
 
-**Статус:** сборка и тесты Linux проходят без игры. Работа в реальном Genshin Impact и прохождение цепочки Steam/Proton **не проверены**. Если Steam runtime убирает `LD_PRELOAD`, не видит путь к `.so` или Wine загружает PE без имени файла в `/proc/self/maps`, патч не применится. Сообщение `diagnose` подтверждает загрузку ELF в тестовый процесс, но не доказывает применение FPS в игре.
+**Статус:** сборка и тестовый процесс проверены; работу в реальной игре и через Steam/Proton мы пока не подтвердили. Использование сторонних средств с игрой может противоречить её условиям; решение и риск остаются за вами.
 
-## Сборка
+## Установка готового пакета (Arch Linux / CachyOS)
 
-Нужны Linux x86_64, Rust/Cargo и стандартная glibc. Зависимостей из crates.io нет; сеть не нужна.
+Скачайте из релиза три файла в один каталог: `genshin-fps-linux-0.2.0-1-x86_64.pkg.tar.zst`, `SHA256SUMS`, `install-genshin-fps.sh`. Запустите:
+
+```sh
+chmod +x install-genshin-fps.sh
+./install-genshin-fps.sh
+```
+
+Установщик проверит SHA256 пакета до запроса прав и установит его через `pkexec` либо `sudo` с `pacman -U`. Можно проверить пакет и установить вручную:
+
+```sh
+sha256sum -c SHA256SUMS
+sudo pacman -U -- ./genshin-fps-linux-0.2.0-1-x86_64.pkg.tar.zst
+```
+
+Пакет установит зависимости `python`, `python-gobject`, `gtk4` и `glibc` через pacman. Wine/Proton устанавливаются отдельно. Для удаления: `sudo pacman -Rns genshin-fps-linux`. Установщик предназначен только для Arch Linux и CachyOS.
+
+## Графический запуск
+
+Откройте **Genshin FPS** в меню приложений или выполните `genshin-fps-gui`. Выберите существующий `GenshinImpact.exe` или `YuanShen.exe`, задайте FPS от 10 до 1000 и команду запуска Wine/Proton, например `wine` или `"/путь с пробелами/proton" run`. Кнопка запуска передаёт путь к игре отдельным аргументом, без оболочки. При открытии окна игра не запускается.
+
+Кнопка **Проверить библиотеку** запускает тестовый процесс. **Скопировать параметры Steam** создаёт строку для *Steam → Properties → Launch Options*. Ни то ни другое не подтверждает изменение FPS в игре.
+
+## Командная строка и Steam
+
+```sh
+genshin-fps diagnose
+genshin-fps launch 120 -- wine /путь/к/GenshinImpact.exe
+genshin-fps steam-options 120
+```
+
+Последняя команда выдаёт готовую строку для параметров запуска Steam с абсолютным путём к установленной `.so`. Используйте `%command%` в выданной строке. Путь к другой библиотеке можно указать через `GENSHIN_FPS_LIB=/абсолютный/путь/libgenshin_fps_preload.so`. Для сообщений preload добавьте `GENSHIN_FPS_LOG=1`. Если Steam runtime не передаёт `LD_PRELOAD` в процесс Wine, эффект не появится.
+
+## Сборка из исходников
+
+Нужны Linux x86_64, Rust/Cargo и glibc. У проекта нет зависимостей из crates.io; сборка работает без сети.
 
 ```sh
 ./build.sh
 ./target/release/genshin-fps diagnose
+./scripts/build-arch-package.sh
+./tests/test-packaging.sh
 ```
 
-Результат: `target/release/genshin-fps` и `target/release/libgenshin_fps_preload.so`. Для установки только в домашний каталог:
+Последние две команды создают и проверяют пакет в `release/`, не устанавливая его в систему. В релизе также лежат архив исходников и `PKGBUILD` с его точной контрольной суммой.
+
+## SteamOS и установка без прав администратора
+
+На SteamOS с неизменяемой системной частью используйте пользовательскую установку из исходников:
 
 ```sh
 ./install-user.sh
 ~/.local/bin/genshin-fps diagnose
+./uninstall-user.sh
 ```
 
-Установка создаёт `~/.local/bin/genshin-fps` и `~/.local/lib/genshin-fps/libgenshin_fps_preload.so`. `sudo`, `sysctl`, системные изменения и Windows-загрузки не нужны. Можно запускать прямо из `target/release` без установки.
+Скрипт ставит CLI, GUI, библиотеку, значок и пункт меню в `~/.local` (с учётом `XDG_DATA_HOME`), не вызывает `sudo` и не трогает системную базу пакетов. Он не устанавливает GTK4/PyGObject: эти зависимости должны уже быть доступны в окружении. При установленном системном `genshin-fps-linux` пользовательская установка откажется запускаться. Удаление затрагивает только файлы, записанные скриптом; для старых установок без его метки потребуется ручное удаление.
 
-## Графический интерфейс GTK4
+## Ограничения и происхождение
 
-Для GUI нужны Python 3, PyGObject и GTK4. На Arch/CachyOS установите пакеты `python-gobject` и `gtk4` через системный менеджер пакетов. На SteamOS используйте доступный в вашей среде способ установки этих зависимостей; `install-user.sh` системные пакеты не устанавливает. Если GTK4 отсутствует, GUI выведет понятное сообщение в stderr и завершится.
+Библиотека ищет загруженный PE32+ AMD64 с точным именем `GenshinImpact.exe` или `YuanShen.exe`, проверяет сигнатуру и адрес записи и меняет значение только внутри текущего процесса. Новая версия игры, иной способ отображения PE в Wine или ограничения Steam runtime могут помешать работе. `diagnose` проверяет загрузку ELF в отдельном тестовом процессе, не игру. Патч не включает инъекцию DLL, обход античита или функции upstream за пределами FPS.
 
-После сборки GUI можно запустить без установки:
-
-```sh
-python3 genshin-fps-gui.py
-```
-
-После `./install-user.sh` запускайте `~/.local/bin/genshin-fps-gui` или **Genshin FPS** из меню приложений KDE Plasma. Установщик создаёт пользовательский файл `~/.local/share/applications/genshin-fps.desktop` (или в `$XDG_DATA_HOME/applications`) и оболочку запуска в `~/.local/bin`. Для GUI не нужен `sudo`. CLI `genshin-fps` остаётся отдельной программой.
-
-В GUI выберите существующий `GenshinImpact.exe` или `YuanShen.exe`, укажите целевой FPS и команду Wine/Proton. Поле команды разбирается как аргументы, например `wine` либо `"/путь с пробелами/proton" run`; команды shell, переменные и пайпы не исполняются. Путь к игре передаётся отдельным аргументом. Необязательный `WINEPREFIX` задаётся только для запуска через GUI. Кнопка **Запустить игру** запускает выбранную команду; при открытии GUI ничего не запускается. Кнопка **Скопировать параметры Steam** получает строку из CLI `steam-options`, показывает её в предпросмотре и копирует в буфер обмена. **Проверить библиотеку** выполняет CLI `diagnose` без запуска игры. Сообщения и ошибки показываются в области состояния. Проверка библиотеки и сообщение о запуске команды не подтверждают изменение FPS в игре.
-
-## Запуск
-
-Передайте FPS от 10 до 1000 и команду запуска целиком после `--`. Аргументы передаются напрямую как отдельные токены, без shell:
-
-```sh
-./target/release/genshin-fps launch 120 -- wine /path/to/GenshinImpact.exe
-./target/release/genshin-fps launch 144 -- /path/to/proton run /path/to/GenshinImpact.exe
-```
-
-Используйте свою существующую установку игры и Wine/Proton. Выбор Wine prefix, каталога игры и параметров Proton остаётся у вашей команды запуска. Для Steam скопируйте вывод команды в *Properties → Launch Options*:
-
-```sh
-./target/release/genshin-fps steam-options 120
-```
-
-Пример вывода (абсолютный путь будет вашим):
-
-```sh
-GENSHIN_FPS_TARGET=120 LD_PRELOAD='/home/user/path/libgenshin_fps_preload.so'${LD_PRELOAD:+:$LD_PRELOAD} %command%
-```
-
-Сохранение прежнего `LD_PRELOAD` нужно для компонентов запуска Steam. Чтобы увидеть состояние preload в stderr/журнале Steam, добавьте `GENSHIN_FPS_LOG=1` перед `%command%` или перед `LD_PRELOAD`. Если `.so` находится в другом месте, задайте `GENSHIN_FPS_LIB=/absolute/path/libgenshin_fps_preload.so` при вызове CLI. Для справки: `genshin-fps help`.
-
-## Проверка и ограничения
-
-`genshin-fps diagnose` запускает собственный тестовый процесс с `LD_PRELOAD`, проверяет экспортированный символ библиотеки и выводит `native ELF library loaded...`. В игре `GENSHIN_FPS_LOG=1` сообщает `loaded`, затем `ready` с адресом цели либо конкретную причину отказа. Отсутствие `loaded` означает, что ELF не попал в процесс. `ready` означает, что сигнатура разрешена и цель проверена; окончательное изменение FPS нужно проверить в игре.
-
-Библиотека ищет **только** отображённый файл с точным именем `GenshinImpact.exe` или `YuanShen.exe`, загруженный как PE32+ AMD64. Она проверяет заголовки и диапазон секции `il2cpp`, ищет `B9 3C 00 00 00 E8`, требует переход `E9` в адресе вызова, следует по ограниченной цепочке `E8`/`E9` и разрешает RIP-смещение у инструкции `89 0D` (`mov [rip+disp32], ecx`). Это соответствует последовательности upstream, с дополнительной проверкой типа инструкции, циклов, границ, единственности совпадения, выравнивания и прав страницы. Запись выполняется из **того же Linux процесса** через `process_vm_writev` каждые 62 мс; библиотека не прикрепляется к другому процессу. Несовпадение с новой версией игры, отсутствие подходящей области памяти или запрет записи приводят к отказу. Никакие устаревшие смещения не используются.
-
-Текущие ограничения: FPS-переменная должна находиться внутри PE-образа и в доступном для записи отображении; некоторые сборки Wine/Proton могут не показывать имя PE-файла в `/proc/self/maps`; preload может не пройти через контейнер Steam. Функции upstream вроде энергосбережения, HDR, mobile UI, инъекции DLL и обхода античита не включены.
-
-## English summary
-
-Native x86_64 Linux ELF `LD_PRELOAD` library, CLI, and GTK4 GUI for the FPS target in Genshin Impact running under Wine/Proton. Build offline with `./build.sh`; run `genshin-fps diagnose`, then `genshin-fps launch 120 -- wine /path/to/GenshinImpact.exe` or generate Steam options with `genshin-fps steam-options 120`. Run the GUI with `python3 genshin-fps-gui.py` after installing `python-gobject` and `gtk4`, or use `./install-user.sh` for a KDE application menu entry. The real game and Steam/Proton path have not been tested. No privileged access or cross-process attach is required.
+Реализация алгоритма FPS опирается на [genshin-fps-unlock](https://github.com/34736384/genshin-fps-unlock), файл `UnlockerStub/dllmain.cpp::SetupData` на коммите `2b85d61dd06f6e11ad86fdd6bd90339f9abc58eb`. Лицензия проекта — [MIT](LICENSE). Состав и ограничения версии: [заметки к выпуску](docs/RELEASE-NOTES.md).

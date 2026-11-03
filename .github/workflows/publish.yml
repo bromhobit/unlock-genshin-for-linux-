@@ -1,0 +1,56 @@
+name: Check and package
+
+on:
+  push:
+    branches: [main]
+    tags: ['v0.2.0-preview.*']
+  workflow_dispatch:
+
+jobs:
+  arch-package:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    permissions:
+      contents: write
+    steps:
+      - name: Install build tools
+        run: pacman -Syu --noconfirm --needed base-devel git rust python python-gobject gtk4 desktop-file-utils shellcheck
+      - uses: actions/checkout@v4
+      - name: Build and test as unprivileged user
+        run: |
+          useradd -m builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+          runuser -u builder -- cargo fmt --all -- --check
+          runuser -u builder -- cargo clippy --offline --all-targets -- -D warnings
+          runuser -u builder -- cargo test --offline
+          runuser -u builder -- python -m unittest discover -s tests
+          runuser -u builder -- python -m py_compile genshin-fps-gui.py
+          runuser -u builder -- scripts/build-arch-package.sh
+          runuser -u builder -- tests/test-packaging.sh
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: genshin-fps-linux-0.2.0-arch
+          path: |
+            release/*.pkg.tar.zst
+            release/SHA256SUMS
+            release/install-genshin-fps.sh
+            release/PKGBUILD
+            release/*.tar.gz
+      - name: Publish preview release
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v0.2.0-preview.')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.2.0-preview.1
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          make_latest: false
+          overwrite_files: true
+          fail_on_unmatched_files: true
+          body_path: docs/RELEASE-NOTES.md
+          files: |
+            release/*.pkg.tar.zst
+            release/SHA256SUMS
+            release/install-genshin-fps.sh
+            release/PKGBUILD
+            release/*.tar.gz

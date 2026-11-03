@@ -1,0 +1,35 @@
+# Maintainer: Genshin FPS Linux contributors
+pkgname=genshin-fps-linux
+pkgver=0.2.0
+pkgrel=1
+pkgdesc='Native Linux FPS target helper for Genshin Impact under Wine/Proton'
+arch=('x86_64')
+url='https://github.com/34736384/genshin-fps-unlock'
+license=('MIT')
+depends=('glibc' 'python' 'python-gobject' 'gtk4')
+makedepends=('rust' 'cargo')
+optdepends=('wine: launch through Wine' 'steam: launch through Steam/Proton')
+source=("${pkgname}-${pkgver}.tar.gz")
+# Replaced with the exact source archive digest by scripts/build-arch-package.sh.
+sha256sums=('REPLACE_WITH_SOURCE_SHA256')
+
+build() {
+  cd "${srcdir}/${pkgname}-${pkgver}"
+  CARGO_HOME="${srcdir}/cargo-home" cargo build --release --offline --locked
+}
+
+package() {
+  cd "${srcdir}/${pkgname}-${pkgver}"
+  install -Dm755 target/release/genshin-fps "${pkgdir}/usr/bin/genshin-fps"
+  install -Dm755 target/release/libgenshin_fps_preload.so \
+    "${pkgdir}/usr/lib/genshin-fps/libgenshin_fps_preload.so"
+  install -Dm755 genshin-fps-gui "${pkgdir}/usr/bin/genshin-fps-gui"
+  install -Dm644 genshin-fps-gui.py "${pkgdir}/usr/lib/genshin-fps/genshin-fps-gui.py"
+  sed 's|@GUI_EXEC@|/usr/bin/genshin-fps-gui|' data/genshin-fps.desktop.in \
+    > "${srcdir}/genshin-fps.desktop"
+  install -Dm644 "${srcdir}/genshin-fps.desktop" \
+    "${pkgdir}/usr/share/applications/genshin-fps.desktop"
+  install -Dm644 data/genshin-fps.svg \
+    "${pkgdir}/usr/share/icons/hicolor/scalable/apps/genshin-fps.svg"
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

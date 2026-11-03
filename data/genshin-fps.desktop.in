@@ -4,5 +4,6 @@ Name=Genshin FPS
 GenericName=Настройка целевого FPS для Genshin Impact
 Comment=Запуск через Wine/Proton и параметры запуска Steam
 Exec=@GUI_EXEC@
+Icon=genshin-fps
 Terminal=false
 Categories=Game;
