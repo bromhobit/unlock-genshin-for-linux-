@@ -55,6 +55,7 @@ staged=$(find "$temp/steam-home/data/genshin-fps" -name '*.so' -type f -print -q
 [ -n "$staged" ] || fail 'Steam preload was not staged in user data'
 cmp -s "$staged" "$root/usr/lib/genshin-fps/libgenshin_fps_preload.so" || fail 'staged library differs'
 grep -Fq "GENSHIN_FPS_TARGET=120 LD_PRELOAD='$staged'" "$temp/options" || fail 'Steam option path mismatch'
+# shellcheck disable=SC2016
 grep -Fq '${LD_PRELOAD:+:$LD_PRELOAD} %command%' "$temp/options" || fail 'existing LD_PRELOAD was not preserved'
 printf 'keep\n' > "$temp/steam-home/data/genshin-fps/unrelated.txt"
 HOME="$temp/steam-home" XDG_DATA_HOME="$temp/steam-home/data" \
@@ -74,7 +75,9 @@ fi
 HOME="$temp/steam-home" GENSHIN_FPS_LOG=1 GENSHIN_FPS_TARGET=120 \
   LD_PRELOAD="$staged" /bin/true 2> "$temp/preload.err" || fail 'staged preload failed'
 log=$(find "$temp/steam-home/.local/state/genshin-fps" -name 'preload-*.log' -type f -print -quit)
-[ -n "$log" ] && grep -Fq 'native ELF preload loaded' "$log" || fail 'state log missing preload diagnostic'
+if [ -z "$log" ] || ! grep -Fq 'native ELF preload loaded' "$log"; then
+  fail 'state log missing preload diagnostic'
+fi
 python3 - "$root/usr/lib/genshin-fps/genshin-fps-gui.py" "$root/usr/bin/genshin-fps" <<'PY'
 import importlib.util
 import sys
