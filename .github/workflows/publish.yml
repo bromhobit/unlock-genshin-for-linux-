@@ -3,15 +3,16 @@ name: Check and package
 on:
   push:
     branches: [main]
-    tags: ['v0.2.4-preview.*']
+    tags: ['v0.2.4*']
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   arch-package:
     runs-on: ubuntu-latest
     container: archlinux:latest
-    permissions:
-      contents: write
     steps:
       - name: Install build tools
         run: pacman -Syu --noconfirm --needed base-devel git rust python python-gobject gtk4 desktop-file-utils shellcheck github-cli
@@ -27,7 +28,7 @@ jobs:
           runuser -u builder -- python -m py_compile genshin-fps-gui.py
           runuser -u builder -- scripts/build-arch-package.sh
           runuser -u builder -- tests/test-packaging.sh
-      - name: Upload package artifact
+      - name: Upload Arch package artifact
         uses: actions/upload-artifact@v4
         with:
           name: genshin-fps-linux-0.2.4-arch
@@ -36,33 +37,74 @@ jobs:
             release/install-genshin-fps.sh
             release/PKGBUILD
             release/*.tar.gz
-      - name: Publish preview release
-        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v0.2.4-preview.')
+
+  linux-packages:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev rpm shellcheck desktop-file-utils
+      - name: Build and test AppImage, DEB, and RPM packages
+        run: |
+          cargo test --offline
+          python3 -m unittest discover -s tests
+          ./scripts/build-linux-packages.sh
+          ./tests/test-linux-packages.sh
+      - name: Upload Linux packages artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: genshin-fps-linux-0.2.4-packages
+          path: |
+            release/*.AppImage
+            release/*.deb
+            release/*.rpm
+
+  release:
+    needs: [arch-package, linux-packages]
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v0.2.4')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Arch package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: genshin-fps-linux-0.2.4-arch
+          path: dist
+      - name: Download Linux packages artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: genshin-fps-linux-0.2.4-packages
+          path: dist
+      - name: Publish release v0.2.4
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.2.4-preview.1
+          tag_name: v0.2.4
+          name: Genshin FPS Linux 0.2.4
           target_commitish: ${{ github.sha }}
-          prerelease: true
-          make_latest: false
+          prerelease: false
+          make_latest: true
           overwrite_files: true
           fail_on_unmatched_files: true
           body_path: docs/RELEASE-NOTES.md
           files: |
-            release/*.pkg.tar.zst
-            release/install-genshin-fps.sh
-            release/PKGBUILD
-            release/*.tar.gz
-
+            dist/Genshin-FPS-0.2.4-x86_64.AppImage
+            dist/genshin-fps-linux_0.2.4_amd64.deb
+            dist/genshin-fps-linux-0.2.4-1.x86_64.rpm
+            dist/genshin-fps-linux-0.2.4-1-x86_64.pkg.tar.zst
+            dist/install-genshin-fps.sh
+            dist/PKGBUILD
+            dist/genshin-fps-linux-0.2.4.tar.gz
       - name: Remove superseded preview releases and tags
-        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v0.2.4-preview.')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Remove only the four known older preview versions, after 0.2.4 is published.
-          for tag in v0.2.0-preview.1 v0.2.1-preview.1 v0.2.2-preview.1 v0.2.3-preview.1; do
-            if gh release view "$tag" >/dev/null 2>&1; then
-              gh release delete "$tag" --cleanup-tag --yes
-            elif gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
-              gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$tag"
+          for tag in v0.2.0-preview.1 v0.2.1-preview.1 v0.2.2-preview.1 v0.2.3-preview.1 v0.2.4-preview.1; do
+            if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+            fi
+            if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
+              gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$tag" || true
             fi
           done
